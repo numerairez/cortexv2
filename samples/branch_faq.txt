@@ -1,0 +1,5 @@
+Q: How long do refunds take?
+A: Approved refunds are credited within 5 business days.
+
+Q: Who approves large refunds?
+A: The area manager approves refunds above PHP 10,000.

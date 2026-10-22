@@ -1,0 +1,22 @@
+# Context Workbench — runtime dependencies (Python 3.10+).
+# Exact, tested versions for Python 3.11+ are pinned in requirements.lock (used by setup.bat).
+
+# Web server and API
+fastapi>=0.110
+uvicorn>=0.27
+pydantic>=2.5
+
+# Spreadsheets and data processing
+pandas>=2.0
+numpy>=1.24
+openpyxl>=3.1
+
+# Documents (knowledge base sources)
+pypdf>=4.0
+python-docx>=1.1
+
+# Confluence connector
+httpx>=0.27
+
+# Reading Excel macros (VBA) from .xlsm/.xlsb/.xls
+olefile>=0.46

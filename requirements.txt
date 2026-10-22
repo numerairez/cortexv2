@@ -1,0 +1,3 @@
+# Install with:  python -m pip install -r requirements.txt
+# (For the exact tested versions use backend/requirements.lock instead.)
+-r backend/requirements.txt
