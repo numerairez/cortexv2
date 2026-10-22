@@ -55,6 +55,15 @@ const LIMITS: Record<keyof Layout, [number, () => number]> = {
   midH: [140, () => window.innerHeight * 0.7],
   settingsW: [280, () => window.innerWidth * 0.6],
 }
+// ---- canvas zoom
+const ZOOM_MIN = 0.3
+const ZOOM_MAX = 1.5
+const ZOOM_KEY = 'cw.studio.zoom'
+const clampZoom = (z: number) => Math.round(Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, z)) * 100) / 100
+function loadZoom(): number {
+  try { return clampZoom(Number(localStorage.getItem(ZOOM_KEY)) || 1) } catch { return 1 }
+}
+
 function loadLayout(): Layout {
   try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') } } catch { return DEFAULT_LAYOUT }
 }
@@ -132,6 +141,8 @@ export default function Studio() {
   const [runDialog, setRunDialog] = useState<{ id: string; title: string } | null>(null)
   const [addAt, setAddAt] = useState<AddAt>(null)
   const [layout, setLayout] = useState<Layout>(loadLayout)
+  const [zoom, setZoomState] = useState<number>(loadZoom)
+  const canvasRef = useRef<HTMLDivElement>(null)
   const [dropping, setDropping] = useState(false)
   // Step groups: which are expanded (UI only), and a Shift+click range of main-flow steps to group.
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -414,6 +425,45 @@ export default function Studio() {
     } catch (e) { toast((e as Error).message, true) } finally { setRunning(false) }
   }
 
+  // ---- zoom: keeps the point under the pointer (or the canvas centre) in place
+  const setZoom = (next: number, anchor?: { x: number; y: number }) => {
+    const el = canvasRef.current
+    setZoomState((cur) => {
+      const z = clampZoom(next)
+      if (el && z !== cur) {
+        const ax = anchor?.x ?? el.clientWidth / 2
+        const ay = anchor?.y ?? el.clientHeight / 2
+        const left = ((el.scrollLeft + ax) * z) / cur - ax
+        const top = ((el.scrollTop + ay) * z) / cur - ay
+        requestAnimationFrame(() => el.scrollTo({ left, top }))
+      }
+      try { localStorage.setItem(ZOOM_KEY, String(z)) } catch { /* ignore */ }
+      return z
+    })
+  }
+  const zoomToFit = () => {
+    const el = canvasRef.current
+    const flow = el?.querySelector<HTMLElement>('.flow')
+    if (!el || !flow) return
+    const z = Math.min((el.clientWidth - 24) / flow.offsetWidth, (el.clientHeight - 12) / flow.offsetHeight, 1)
+    setZoom(z)
+    requestAnimationFrame(() => el.scrollTo({ left: 0, top: 0 }))
+  }
+  // Ctrl + mouse wheel (and trackpad pinch, which browsers report as Ctrl + wheel) zooms the canvas.
+  useEffect(() => {
+    const el = canvasRef.current
+    if (!el) return
+    const onWheel = (e: WheelEvent) => {
+      if (!e.ctrlKey && !e.metaKey) return
+      e.preventDefault()
+      const r = el.getBoundingClientRect()
+      // ~15% per mouse-wheel notch; trackpad pinches send small deltas and stay smooth.
+      setZoom(zoom * Math.exp(-Math.max(-120, Math.min(120, e.deltaY)) * 0.0012), { x: e.clientX - r.left, y: e.clientY - r.top })
+    }
+    el.addEventListener('wheel', onWheel, { passive: false })
+    return () => el.removeEventListener('wheel', onWheel)
+  })
+
   // ---- keyboard shortcuts
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -427,6 +477,9 @@ export default function Studio() {
       else if (mod && k === 'y' && !typing) { e.preventDefault(); redo() }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && !typing && sel.kind === 'step') { e.preventDefault(); deleteStep(sel.i, sel.branch) }
       else if (e.key === 'Escape') setAddAt(null)
+      else if (!typing && !mod && (e.key === '+' || e.key === '=')) { e.preventDefault(); setZoom(zoom + 0.1) }
+      else if (!typing && !mod && e.key === '-') { e.preventDefault(); setZoom(zoom - 0.1) }
+      else if (!typing && !mod && e.key === '0') { e.preventDefault(); setZoom(1) }
     }
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
@@ -528,7 +581,17 @@ export default function Studio() {
           <span className="canvas-run-label">{running ? 'Running…' : 'Run'}</span>
         </button>
       )}
+      {!empty && (
+        <div className="zoom-controls" role="group" aria-label="Zoom">
+          <button className="ghost icon" onClick={() => setZoom(zoom - 0.1)} disabled={zoom <= ZOOM_MIN} title="Zoom out (−)">−</button>
+          <button className="ghost zoom-level" onClick={() => setZoom(1)} title="Back to 100% (0)">{Math.round(zoom * 100)}%</button>
+          <button className="ghost icon" onClick={() => setZoom(zoom + 0.1)} disabled={zoom >= ZOOM_MAX} title="Zoom in (+)">+</button>
+          <span className="zoom-sep" />
+          <button className="ghost zoom-fit" onClick={zoomToFit} title="Fit the whole workflow in view">Fit</button>
+        </div>
+      )}
       <div
+        ref={canvasRef}
         className={`prep-canvas${dropping ? ' dropping' : ''}${empty ? ' empty' : ''}`}
         style={empty ? undefined : { height: layout.canvasH }}
         onDragOver={(e) => { if (e.dataTransfer.types.includes('Files')) { e.preventDefault(); setDropping(true) } }}
@@ -547,7 +610,8 @@ export default function Studio() {
         ) : (
           <FlowCanvas recipe={recipe} bindings={bindings} byId={byId} preview={preview} sel={sel} setSel={setSel}
             addAt={addAt} setAddAt={setAddAt} onAdd={(op, a) => addStep(op, a.i, a.branch)}
-            expanded={expanded} onToggleGroup={toggleGroup} range={range} onStepClick={clickStep} onConnect={(role) => setAddData({ role })} onAddData={() => setAddData({})} />
+            expanded={expanded} onToggleGroup={toggleGroup} range={range} onStepClick={clickStep} onConnect={(role) => setAddData({ role })} onAddData={() => setAddData({})}
+            zoom={zoom} />
         )}
         {dropping && <div className="canvas-drop-overlay">Drop to add this file to the workflow</div>}
       </div>
@@ -712,7 +776,7 @@ export default function Studio() {
           <b>{nodeTitle}</b>
           {preview?.data && <span className="muted small">{preview.data.row_count.toLocaleString()} rows · {preview.data.columns.length} columns{preview.data.row_count > preview.data.rows.length ? ` · showing first ${preview.data.rows.length}` : ''}</span>}
           <span className="spacer" />
-          <span className="faint small kbd-hints">Ctrl+Enter run · Ctrl+Z undo · Ctrl+S save · Del removes a step</span>
+          <span className="faint small kbd-hints">Ctrl+Enter run · Ctrl+Z undo · Ctrl+S save · Del removes a step · +/− zoom</span>
         </div>
         <ErrorBox error={previewError} />
         {err && !(sel.kind === 'step' && isErrAt(sel.i, sel.branch)) && (
@@ -782,12 +846,13 @@ function MacroBanner({ info, onAddData }: { info: MacroInfo; onAddData: () => vo
 // ======================================================================== flow canvas
 
 function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAddAt, onAdd, onConnect, onAddData,
-  expanded, onToggleGroup, range, onStepClick }: {
+  expanded, onToggleGroup, range, onStepClick, zoom }: {
   recipe: Recipe; bindings: Record<string, string>; byId: Record<string, Selection>; preview: Preview | null
   sel: Sel; setSel: (s: Sel) => void; addAt: AddAt; setAddAt: (a: AddAt) => void
   onAdd: (op: string, at: NonNullable<AddAt>) => void; onConnect: (role: string) => void; onAddData: () => void
   expanded: Set<string>; onToggleGroup: (id: string, open?: boolean) => void
   range: { start: number; end: number } | null; onStepClick: (i: number, branch: string | undefined, shift: boolean) => void
+  zoom: number
 }) {
   const n = recipe.steps.length
   const pos = (col: number, lane: number) => ({ x: PAD_X + col * COL_W, y: PAD_Y + lane * LANE_H })
@@ -813,8 +878,9 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
   const ghostCol = Math.max(resultCol, ...rows.filter((r) => r.lane === 1).map((r) => rowEnd(r) + 1))
   const lanes = Math.max(2, 1 + secondary.length)
   const maxCol = Math.max(ghostCol, resultCol, ...rows.map(rowEnd))
-  const width = Math.max(PAD_X * 2 + maxCol * COL_W, 600)
-  const height = PAD_Y + lanes * LANE_H - 10
+  // Extra room on the right and bottom so the floating Run button and zoom controls never cover a node.
+  const width = Math.max(PAD_X * 2 + maxCol * COL_W + 70, 600)
+  const height = PAD_Y + lanes * LANE_H + 30
 
   const edges: ReactNode[] = []
   const curve = (a: { x: number; y: number }, b: { x: number; y: number }, key: string) => {
@@ -924,7 +990,9 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
   )
 
   return (
-    <div className="flow" style={{ width, height }}>
+    // The flow is laid out at 100% and scaled; the outer box reserves the scaled size so scrolling stays right.
+    <div className="flow-zoom" style={{ width: width * zoom, height: height * zoom }}>
+    <div className="flow" style={{ width, height, transform: `scale(${zoom})` }}>
       <svg className="flow-edges" width={width} height={height}>{edges}</svg>
       {groups.filter((g) => expanded.has(g.id) && colOf[g.start] !== undefined).map(groupBox)}
       {inputNode(recipe.base, 0, 0, false)}
@@ -967,6 +1035,7 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
         )
       })()}
       {addAt && <StepMenu at={addAt} onPick={(op) => onAdd(op, addAt)} />}
+    </div>
     </div>
   )
 }

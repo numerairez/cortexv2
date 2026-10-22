@@ -28,7 +28,7 @@ export default function SourceDetail() {
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
   const remove = async () => {
-    if (!confirm(`Remove "${src.name}" and its selections from the workbench? The file itself is not touched.`)) return
+    if (!confirm(`Remove "${src.name}" and its selections from Flowbook? The file itself is not touched.`)) return
     await api.del(`/api/sources/${src.id}`)
     toast('Source removed')
     nav('/sources')

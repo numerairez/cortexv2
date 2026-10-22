@@ -25,12 +25,12 @@ SETTINGS_DEFAULTS = {
     "chatbot_name": "the approved company AI chatbot",
 }
 BROWSABLE_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".xlsb", ".xls", ".bas", ".cls"} | DOCUMENT_EXTS
-REQUIRED_PACKAGES = ["fastapi", "uvicorn", "pandas", "openpyxl", "pypdf", "python-docx", "httpx", "olefile"]
+REQUIRED_PACKAGES = ["fastapi", "uvicorn", "pydantic", "pandas", "numpy", "openpyxl", "pypdf", "python-docx", "httpx", "olefile"]
 
 
 @router.get("/health")
 def health():
-    return {"ok": True, "app": "context-workbench", "version": APP_VERSION}
+    return {"ok": True, "app": "flowbook", "version": APP_VERSION}
 
 
 @router.get("/env")

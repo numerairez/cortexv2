@@ -2,7 +2,7 @@
 rem One-time setup: creates a private Python environment (.venv) and installs dependencies.
 setlocal
 cd /d "%~dp0"
-title Context Workbench setup
+title Flowbook setup
 
 set "PY="
 where py >nul 2>nul && set "PY=py -3"

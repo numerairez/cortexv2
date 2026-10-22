@@ -1,4 +1,8 @@
-# Context Workbench
+<img src="docs/brand/flowbook-logo.svg" width="72" alt="Flowbook logo">
+
+# Flowbook
+
+*Repeatable spreadsheet workflows — no macros needed.*
 
 A local, browser-based **workflow studio** for spreadsheets. Colleagues drop in Excel/CSV files, build a visual, rerunnable workflow (filter, join, calculate, summarise…), and export the result. Existing **Excel macros can be imported**: the VBA is read (never run), every dataset it touches is flagged and connected, and an approved AI chatbot translates it into workflow steps through a manual copy-prompt / paste-reply loop.
 
@@ -8,11 +12,11 @@ Everything runs on the user's own PC, bound to `127.0.0.1`. See [PLAN.md](PLAN.m
 
 ## For colleagues (Windows)
 
-1. Unzip the release folder somewhere in your user area (e.g. `Documents\context-workbench`).
+1. Unzip the release folder somewhere in your user area (e.g. `Documents\flowbook`).
 2. Double-click **`setup.bat`** once. It creates a private Python environment in `.venv` and installs the dependencies. If the release includes a `wheels` folder, setup runs fully offline.
 3. Double-click **`launch.bat`**. Your browser opens the app. Keep the black window open while you work; close it to stop the app.
 
-Your data (database, outputs, logs) lives in `%LOCALAPPDATA%\ContextWorkbench`, not in the app folder, so updating the app never touches it.
+Your data (database, outputs, logs) lives in `%LOCALAPPDATA%\Flowbook`, not in the app folder, so updating the app never touches it. (Data from the app's earlier name, `ContextWorkbench`, is moved there automatically on first start.)
 
 Requirements: Python 3.10+ (3.11+ uses the pinned lock file). No administrator rights or Node.js needed.
 
@@ -58,7 +62,7 @@ CW_DATA_DIR=$PWD/.cw-dev-data ./launch.sh
 .venv/bin/python scripts/make_samples.py
 ```
 
-To build a release for colleagues, run `python scripts/build_release.py --wheels`. This creates `release/context-workbench-<version>/` and a `.zip` with the compiled UI, launch/setup scripts, and Windows wheels for offline setup.
+To build a release for colleagues, run `python scripts/build_release.py --wheels`. This creates `release/flowbook-<version>/` and a `.zip` with the compiled UI, launch/setup scripts, and Windows wheels for offline setup.
 
 ### Layout
 

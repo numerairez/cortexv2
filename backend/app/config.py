@@ -7,11 +7,22 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-APP_NAME = "ContextWorkbench"
+APP_NAME = "Flowbook"
+LEGACY_APP_NAMES = ("ContextWorkbench",)   # earlier names; their data folder is moved over once
 APP_VERSION = "0.1.0"
 MIN_PYTHON = (3, 10)
 DEFAULT_PORT = 8765
 HOST = "127.0.0.1"  # never bind to 0.0.0.0
+
+
+def _user_data_base() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            return Path(base)
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support"
+    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
 
 
 def default_data_dir() -> Path:
@@ -19,13 +30,19 @@ def default_data_dir() -> Path:
     override = os.environ.get("CW_DATA_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-        if base:
-            return Path(base) / APP_NAME
-    if sys.platform == "darwin":
-        return Path.home() / "Library" / "Application Support" / APP_NAME
-    return Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / APP_NAME
+    base = _user_data_base()
+    current = base / APP_NAME
+    if not current.exists():
+        # Keep people's saved workflows when the app is renamed: move the old folder over.
+        for old in LEGACY_APP_NAMES:
+            legacy = base / old
+            if legacy.is_dir():
+                try:
+                    legacy.rename(current)
+                except OSError:
+                    return legacy   # e.g. a file is locked; keep using the old folder rather than lose data
+                break
+    return current
 
 
 @dataclass(frozen=True)

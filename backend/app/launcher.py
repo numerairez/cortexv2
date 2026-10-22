@@ -28,7 +28,7 @@ REQUIRED_MODULES = {"fastapi": "fastapi", "uvicorn": "uvicorn", "pandas": "panda
 
 def fail(message: str) -> None:
     print("\n" + "=" * 70)
-    print("  Context Workbench could not start")
+    print("  Flowbook could not start")
     print("=" * 70)
     print(message)
     print("=" * 70 + "\n")
@@ -64,7 +64,7 @@ def setup_logging(log_dir) -> None:
 def healthy(port: int, timeout: float = 1.0) -> bool:
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=timeout) as r:
-            return json.load(r).get("app") == "context-workbench"
+            return json.load(r).get("app") == "flowbook"
     except Exception:
         return False
 
@@ -79,7 +79,7 @@ def port_free(port: int) -> bool:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Start Context Workbench")
+    parser = argparse.ArgumentParser(description="Start Flowbook")
     parser.add_argument("--port", type=int, default=None)
     parser.add_argument("--no-browser", action="store_true")
     args = parser.parse_args()
@@ -98,7 +98,7 @@ def main() -> None:
             info = json.loads(paths.instance_file.read_text())
             if healthy(int(info["port"])):
                 url = f"http://127.0.0.1:{info['port']}/"
-                print(f"Context Workbench is already running at {url} — opening it.")
+                print(f"Flowbook is already running at {url} — opening it.")
                 if not args.no_browser:
                     webbrowser.open(url)
                 return
@@ -134,7 +134,7 @@ def main() -> None:
 
     paths.instance_file.write_text(json.dumps({"port": port, "pid": os.getpid()}))
     log.info("Started on port %s (data dir %s)", port, paths.root)
-    print("\n  Context Workbench is running at " + url)
+    print("\n  Flowbook is running at " + url)
     print("  Your data is stored in: " + str(paths.root))
     print("\n  Keep this window open while you use the app.")
     print("  To stop: close this window or press Ctrl+C.\n")

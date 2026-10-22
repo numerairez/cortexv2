@@ -231,7 +231,7 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
                 {busy ? <><Spinner /> Adding…</> : <>
                   <div className="row" style={{ justifyContent: 'center', gap: 6 }}><FileIcon kind="excel" size={30} /><FileIcon kind="csv" size={30} /></div>
                   <b>Drop an Excel or CSV file here</b>
-                  <span className="muted small">or click to choose one · a copy is kept in your Context Workbench folder</span>
+                  <span className="muted small">or click to choose one · a copy is kept in your Flowbook folder</span>
                 </>}
               </DropZone>
               <details>

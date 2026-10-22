@@ -40,7 +40,7 @@ def main() -> None:
     if not (ROOT / "frontend" / "dist" / "index.html").exists():
         sys.exit("frontend/dist is missing; build the UI first")
 
-    out = ROOT / "release" / f"context-workbench-{APP_VERSION}"
+    out = ROOT / "release" / f"flowbook-{APP_VERSION}"
     if out.exists():
         shutil.rmtree(out)
     out.mkdir(parents=True)

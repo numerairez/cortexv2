@@ -19,7 +19,7 @@ export default function Sources() {
       <div className="page-head">
         <div>
           <h1>My data</h1>
-          <p className="sub">Files, recurring file templates and pages the workbench knows about. Content stays where it is; we keep a reference and a fingerprint.</p>
+          <p className="sub">Files, recurring file templates and pages Flowbook knows about. Content stays where it is; we keep a reference and a fingerprint.</p>
         </div>
         <button className="primary" onClick={() => setAdding(true)}>+ Add source</button>
       </div>

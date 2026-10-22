@@ -300,3 +300,16 @@ def test_output_folder_name_tokens_and_conflicts(client, files, tmp_path):
     assert bad["status"] == "failed" and "output folder was not found" in bad["errors"][0]
     assert client.get("/api/fs/check-folder", params={"path": str(out)}).json()["ok"]
     assert not client.get("/api/fs/check-folder", params={"path": str(tmp_path / "missing")}).json()["ok"]
+
+
+def test_renamed_data_folder_is_migrated(tmp_path, monkeypatch):
+    from app import config
+
+    monkeypatch.delenv("CW_DATA_DIR", raising=False)
+    monkeypatch.setattr(config, "_user_data_base", lambda: tmp_path)
+    old = tmp_path / "ContextWorkbench"
+    old.mkdir()
+    (old / "workbench.sqlite3").write_text("data")
+    new = config.default_data_dir()
+    assert new == tmp_path / "Flowbook" and (new / "workbench.sqlite3").read_text() == "data" and not old.exists()
+    assert config.default_data_dir() == new   # second start: nothing to move

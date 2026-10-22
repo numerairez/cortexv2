@@ -1,8 +1,8 @@
 @echo off
-rem Context Workbench launcher. Double-click to start the app in your browser.
+rem Flowbook launcher. Double-click to start the app in your browser.
 setlocal
 cd /d "%~dp0"
-title Context Workbench
+title Flowbook
 
 set "PY="
 if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"

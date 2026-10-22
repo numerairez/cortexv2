@@ -42,7 +42,7 @@ async def lifespan(_: FastAPI):
 
 def create_app(allowed_ports: set[int] | None = None) -> FastAPI:
     allowed_ports = allowed_ports or _env_ports()
-    app = FastAPI(title="Context Workbench", version=APP_VERSION, docs_url="/api/docs", redoc_url=None,
+    app = FastAPI(title="Flowbook", version=APP_VERSION, docs_url="/api/docs", redoc_url=None,
                   openapi_url="/api/openapi.json", lifespan=lifespan)
 
     @app.middleware("http")
