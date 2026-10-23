@@ -561,3 +561,20 @@ kbd { font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radi
 .zoom-controls .zoom-level { font-size: 12px; min-width: 48px; font-variant-numeric: tabular-nums; }
 .zoom-controls .zoom-fit { font-size: 12px; }
 .zoom-sep { width: 1px; height: 16px; background: var(--line); margin: 0 2px; }
+
+/* ---------- My data: file icon grid */
+.file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; padding: 14px; }
+button.file-tile {
+  display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 8px 10px;
+  border: 1px solid transparent; border-radius: 8px; background: transparent; text-align: center; cursor: pointer; min-width: 0; white-space: normal; justify-content: flex-start;
+}
+button.file-tile:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--line); }
+.file-tile:active { cursor: grabbing; }
+.file-tile.dragging { opacity: .35; border-style: dashed; border-color: var(--accent); }
+.file-tile-icon { position: relative; display: inline-flex; }
+.file-tile-dot { position: absolute; right: -4px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--surface); background: var(--warn); }
+.file-tile-dot.missing, .file-tile-dot.error { background: var(--bad); }
+.file-tile-name {
+  font-weight: 600; font-size: 13px; line-height: 1.3; word-break: break-word;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}

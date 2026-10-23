@@ -10,6 +10,16 @@ import type { Selection, SelectionCheck, SheetPreview, SheetProfile, Source } fr
 export default function SourceDetail() {
   const { id } = useParams()
   const nav = useNavigate()
+  return (
+    <>
+      <div className="crumbs"><Link to="/sources">Sources</Link> /</div>
+      <SourceDetailView id={id!} onRemoved={() => nav('/sources')} />
+    </>
+  )
+}
+
+/** A source's details, selections and sheet configurator; used by its own page and the My data pop-up. */
+export function SourceDetailView({ id, onRemoved, onChanged }: { id: string; onRemoved: () => void; onChanged?: () => void }) {
   const toast = useToast()
   const { data: src, error, reload, setData } = useLoad(() => api.get<Source>(`/api/sources/${id}`), [id])
   const [busy, setBusy] = useState(false)
@@ -24,6 +34,7 @@ export default function SourceDetail() {
     try {
       const s = await api.post<Source>(`/api/sources/${src.id}/refresh`)
       setData({ ...src, ...s })
+      onChanged?.()
       toast(s.status === 'ok' ? 'No changes detected' : s.status_detail ?? s.status)
     } catch (e) { toast((e as Error).message, true) } finally { setBusy(false) }
   }
@@ -31,13 +42,12 @@ export default function SourceDetail() {
     if (!confirm(`Remove "${src.name}" and its selections from Flowbook? The file itself is not touched.`)) return
     await api.del(`/api/sources/${src.id}`)
     toast('Source removed')
-    nav('/sources')
+    onRemoved()
   }
   const tabular = src.kind === 'excel' || src.kind === 'csv'
 
   return (
     <>
-      <div className="crumbs"><Link to="/sources">Sources</Link> /</div>
       <div className="page-head">
         <div className="row" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
           <KindIcon kind={src.kind} ext={src.metadata.extension} />
@@ -70,7 +80,7 @@ export default function SourceDetail() {
           key={editing?.id ?? 'new'}
           source={src}
           editing={editing}
-          onSaved={() => { setEditing(null); reload() }}
+          onSaved={() => { setEditing(null); reload(); onChanged?.() }}
           onCancelEdit={() => setEditing(null)}
         />
       )}
@@ -82,12 +92,12 @@ export default function SourceDetail() {
         </div>
         {(src.selections ?? []).length === 0 && <p className="faint">None yet{tabular ? ' — configure a sheet above and save it.' : '.'}</p>}
         {(src.selections ?? []).map((s) => (
-          <SelectionRow key={s.id} sel={s} source={src} onEdit={tabular ? () => { setEditing(s); window.scrollTo({ top: 300, behavior: 'smooth' }) } : undefined} onChanged={reload} />
+          <SelectionRow key={s.id} sel={s} source={src} onEdit={tabular ? () => { setEditing(s); document.getElementById('sheet-config')?.scrollIntoView({ behavior: 'smooth' }) } : undefined} onChanged={() => { reload(); onChanged?.() }} />
         ))}
       </div>
 
       {relocating && (
-        <RelocateModal source={src} onClose={() => setRelocating(false)} onDone={(s) => { setRelocating(false); setData({ ...src, ...s }); reload() }} />
+        <RelocateModal source={src} onClose={() => setRelocating(false)} onDone={(s) => { setRelocating(false); setData({ ...src, ...s }); reload(); onChanged?.() }} />
       )}
     </>
   )
@@ -150,7 +160,7 @@ function SelectionRow({ sel, source, onEdit, onChanged }: { sel: Selection; sour
       {offer && (
         <Modal title="Data template" wide onClose={() => setOffer(null)}>
           <TemplateOffer selection={{ ...sel, source_kind: source.kind }} suggestion={offer}
-            onDone={(ds) => { setOffer(null); if (ds) { toast(`Template “${ds.label}” created`); nav('/sources') } }} />
+            onDone={(ds) => { setOffer(null); if (ds) { toast(`Template “${ds.label}” created`); onChanged(); nav('/sources') } }} />
         </Modal>
       )}
       {onEdit && <button className="sm" onClick={onEdit}>Edit</button>}
@@ -222,7 +232,7 @@ function SheetConfigurator({ source, editing, onSaved, onCancelEdit }: {
   }
 
   return (
-    <div className="card">
+    <div className="card" id="sheet-config">
       <div className="card-head">
         <h2>{editing ? `Edit selection: ${editing.label}` : 'Configure a sheet'}</h2>
         {editing && <button className="sm" onClick={onCancelEdit}>Cancel edit</button>}

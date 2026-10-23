@@ -1,18 +1,64 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { FileBrowser } from '../components/FileBrowser'
-import { Empty, ErrorBox, Field, KindIcon, Loading, Modal, StatusBadge, fmtDate, useLoad, useToast } from '../components/ui'
+import { Empty, ErrorBox, Field, Loading, Modal, useLoad, useToast } from '../components/ui'
 import type { DataTemplate, Source } from '../types'
-import { FileIcon } from '../components/Icons'
+import { FileIcon, fileTypeFor } from '../components/Icons'
+import { SourceDetailView } from './SourceDetail'
+
+const ORDER_KEY = 'flowbook.sourceOrder'
+
+function loadOrder(): string[] {
+  try { return JSON.parse(localStorage.getItem(ORDER_KEY) ?? '[]') } catch { return [] }
+}
+function saveOrder(ids: string[]) {
+  try { localStorage.setItem(ORDER_KEY, JSON.stringify(ids)) } catch { /* ignore */ }
+}
+
+/** Sources in the user's saved order; ones not placed yet keep the server's order, after the rest. */
+function arrange(list: Source[], order: string[]) {
+  const rank = new Map(order.map((id, i) => [id, i]))
+  return list.map((s, i) => ({ s, r: rank.get(s.id) ?? order.length + i })).sort((a, b) => a.r - b.r).map((x) => x.s)
+}
+
+const ARRANGE_BY: Record<string, (a: Source, b: Source) => number> = {
+  name: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }),
+  type: (a, b) => fileTypeFor(a.kind, a.metadata.extension).localeCompare(fileTypeFor(b.kind, b.metadata.extension)) || a.name.localeCompare(b.name),
+  updated: (a, b) => b.updated_at.localeCompare(a.updated_at),
+}
 
 export default function Sources() {
   const { data, error, loading, reload } = useLoad(() => api.get<Source[]>('/api/sources'), [])
   const templates = useLoad(() => api.get<DataTemplate[]>('/api/templates'), [])
   const [adding, setAdding] = useState(false)
   const [filter, setFilter] = useState('')
-  const nav = useNavigate()
-  const shown = (data ?? []).filter((s) => !filter || (s.name + s.location).toLowerCase().includes(filter.toLowerCase()))
+  const [order, setOrder] = useState(loadOrder)
+  const [dragId, setDragId] = useState<string | null>(null)
+  const [params, setParams] = useSearchParams()
+  const openId = params.get('open')
+  const open = (id: string | null) => setParams(id ? { open: id } : {})
+
+  const all = useMemo(() => arrange(data ?? [], order), [data, order])
+  const shown = all.filter((s) => !filter || (s.name + s.location).toLowerCase().includes(filter.toLowerCase()))
+  const opened = all.find((s) => s.id === openId)
+
+  /** Ids with `id` moved to where `targetId` sits now. */
+  const reordered = (id: string, targetId: string) => {
+    const ids = all.map((s) => s.id).filter((x) => x !== id)
+    ids.splice(all.findIndex((s) => s.id === targetId), 0, id)
+    return ids
+  }
+  // Dragging reorders live; the order is saved on drop.
+  const dragOnto = (targetId: string) => { if (dragId && dragId !== targetId) setOrder(reordered(dragId, targetId)) }
+  const moveBy = (id: string, delta: number) => {
+    const target = shown[shown.findIndex((s) => s.id === id) + delta]
+    if (target) { const ids = reordered(id, target.id); setOrder(ids); saveOrder(ids) }
+  }
+  const arrangeBy = (key: string) => {
+    const ids = [...all].sort(ARRANGE_BY[key]).map((s) => s.id)
+    setOrder(ids); saveOrder(ids)
+  }
 
   return (
     <>
@@ -33,39 +79,57 @@ export default function Sources() {
         </div>
       ) : (
         <div className="card flush">
-          <div style={{ padding: 10, borderBottom: '1px solid var(--line)' }}>
+          <div className="row" style={{ padding: 10, borderBottom: '1px solid var(--line)', flexWrap: 'nowrap' }}>
             <input placeholder="Filter sources…" value={filter} onChange={(e) => setFilter(e.target.value)} aria-label="Filter sources" />
+            <select className="inline-input" value="" onChange={(e) => e.target.value && arrangeBy(e.target.value)} aria-label="Arrange sources" style={{ width: 'auto' }}>
+              <option value="">Arrange by…</option>
+              <option value="name">Name</option>
+              <option value="type">File type</option>
+              <option value="updated">Last updated</option>
+            </select>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Name</th><th>Status</th><th>Selections</th><th>Location</th><th>Updated</th></tr>
-              </thead>
-              <tbody>
-                {shown.map((s) => (
-                  <tr key={s.id} className="clickable" onClick={() => nav(`/sources/${s.id}`)}>
-                    <td>
-                      <div className="row" style={{ flexWrap: 'nowrap' }}>
-                        <KindIcon kind={s.kind} ext={s.metadata.extension} />
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontWeight: 600 }}>{s.name}</div>
-                          {s.metadata.sheets && <div className="faint small">{s.metadata.sheets.length} sheet(s)</div>}
-                        </div>
-                      </div>
-                    </td>
-                    <td><StatusBadge status={s.status} /></td>
-                    <td>{s.selection_count}</td>
-                    <td className="mono small break" style={{ maxWidth: 380 }}>{s.location}</td>
-                    <td className="nowrap small muted">{fmtDate(s.updated_at)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="file-grid" role="list" aria-label="Sources — drag to rearrange">
+            {shown.map((s) => (
+              <button
+                key={s.id}
+                role="listitem"
+                className={`file-tile${dragId === s.id ? ' dragging' : ''}`}
+                title={`${s.name}\n${s.location}\nDrag to rearrange · Alt + arrow keys to move`}
+                draggable
+                onClick={() => open(s.id)}
+                onDragStart={(e) => { setDragId(s.id); e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', s.id) }}
+                onDragEnter={() => dragOnto(s.id)}
+                onDragOver={(e) => { if (dragId) e.preventDefault() }}
+                onDrop={(e) => e.preventDefault()}
+                onDragEnd={() => { setDragId(null); saveOrder(order) }}
+                onKeyDown={(e) => {
+                  if (!e.altKey) return
+                  const delta = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 }[e.key]
+                  if (delta) { e.preventDefault(); moveBy(s.id, delta) }
+                }}
+              >
+                <span className="file-tile-icon">
+                  <FileIcon kind={s.kind} ext={s.metadata.extension} size={46} />
+                  {s.status !== 'ok' && <span className={`file-tile-dot ${s.status}`} title={s.status_detail ?? s.status} />}
+                </span>
+                <span className="file-tile-name">{s.name}</span>
+                <span className="faint small">
+                  {s.metadata.sheets ? `${s.metadata.sheets.length} sheet${s.metadata.sheets.length === 1 ? '' : 's'}` : fileTypeFor(s.kind, s.metadata.extension)}
+                  {!!s.selection_count && ` · ${s.selection_count} sel.`}
+                </span>
+              </button>
+            ))}
+            {shown.length === 0 && <p className="faint" style={{ gridColumn: '1 / -1' }}>Nothing matches “{filter}”.</p>}
           </div>
         </div>
       )}
       <TemplatesCard templates={templates.data} reload={templates.reload} />
-      {adding && <AddSourceModal onClose={() => setAdding(false)} onAdded={(s) => { setAdding(false); reload(); nav(`/sources/${s.id}`) }} />}
+      {openId && (
+        <Modal title={opened?.name ?? 'Source'} wide onClose={() => open(null)}>
+          <SourceDetailView key={openId} id={openId} onRemoved={() => { open(null); reload() }} onChanged={() => { reload(); templates.reload() }} />
+        </Modal>
+      )}
+      {adding && <AddSourceModal onClose={() => setAdding(false)} onAdded={(s) => { setAdding(false); reload(); open(s.id) }} />}
     </>
   )
 }

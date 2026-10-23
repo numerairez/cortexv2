@@ -75,13 +75,18 @@ export function Empty({ title, children }: { title: string; children?: ReactNode
 export function Modal({ title, onClose, children, footer, wide }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean
 }) {
+  const back = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
+    // With modals stacked (e.g. a dialog opened from a pop-up), Escape closes only the top one.
+    const onKey = (e: KeyboardEvent) => {
+      const all = document.querySelectorAll('.modal-back')
+      if (e.key === 'Escape' && all[all.length - 1] === back.current) onClose()
+    }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
   return (
-    <div className="modal-back" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
+    <div className="modal-back" ref={back} onMouseDown={(e) => { if (e.target === e.currentTarget) onClose() }}>
       <div className={`modal${wide ? ' wide' : ''}`} role="dialog" aria-modal="true" aria-label={title}>
         <div className="modal-head">
           <h2>{title}</h2>
