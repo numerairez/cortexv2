@@ -245,6 +245,38 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--m
 .subgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; align-items: end; }
 .cond-row { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1.3fr) auto; gap: 6px; align-items: center; margin-bottom: 6px; }
 @media (max-width: 640px) { .cond-row { grid-template-columns: 1fr; } }
+.filter-cond { border-bottom: 1px solid var(--line); }
+.filter-cond.open { padding-bottom: 12px; margin-bottom: 4px; }
+.filter-cond .cond-head { display: flex; align-items: center; gap: 2px; min-height: 34px; }
+.filter-cond.open .cond-head { margin-bottom: 4px; }
+.filter-cond .chevron { width: 22px; padding: 0; color: var(--muted); font-size: 11px; }
+.filter-cond .summary-line { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; text-align: left; padding: 4px; }
+.filter-cond .summary-line .col { font-weight: 600; white-space: nowrap; }
+.filter-cond .summary-line .desc { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.filter-cond .col-pick { flex: 1; min-width: 0; font-weight: 600; border-color: transparent; background-color: transparent; padding-left: 4px; }
+.filter-cond .col-pick:hover { border-color: var(--line-strong); }
+.filter-cond .check { display: flex; align-items: center; gap: 6px; margin-top: 6px; cursor: pointer; }
+.seg-tabs { display: flex; gap: 14px; border-bottom: 1px solid var(--line); margin-bottom: 8px; }
+.seg-tabs button { border: 0; border-radius: 0; background: none; padding: 4px 0; margin-bottom: -1px; font-size: 12.5px; color: var(--muted); border-bottom: 2px solid transparent; }
+.seg-tabs button:hover:not(:disabled) { background: none; color: var(--fg); }
+.seg-tabs button.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--accent); }
+.value-pick .search { width: 100%; margin-bottom: 4px; }
+.value-pick .pick-list { max-height: 200px; overflow-y: auto; margin-bottom: 4px; }
+.value-pick .pick-list label { display: flex; align-items: center; gap: 8px; padding: 2px 4px; border-radius: 4px; cursor: pointer; font-size: 13px; }
+.value-pick .pick-list label:hover { background: var(--surface-2); }
+.value-pick .pick-list label.all { font-weight: 500; }
+.value-pick .pick-list .v { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.value-pick .pick-list .n { color: var(--faint, var(--muted)); font-size: 12px; font-variant-numeric: tabular-nums; }
+.range-filter .bounds { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.range-filter .bounds input:last-child { text-align: right; }
+.range-filter .slider { position: relative; height: 20px; margin: 6px 0 0; }
+.range-filter .slider::before, .range-filter .slider .fill { content: ''; position: absolute; top: 9px; height: 3px; border-radius: 2px; }
+.range-filter .slider::before { left: 0; right: 0; background: var(--line-strong); }
+.range-filter .slider .fill { background: var(--accent); }
+.range-filter .slider input { position: absolute; inset: 0; width: 100%; margin: 0; padding: 0; border: 0; background: none; outline: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.range-filter .slider input::-webkit-slider-runnable-track { background: none; }
+.range-filter .slider input::-webkit-slider-thumb { pointer-events: auto; -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: pointer; }
+.range-filter .slider input::-moz-range-thumb { pointer-events: auto; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--accent); cursor: pointer; }
 
 /* ---------- Transformation Studio (Tableau Prep–style flow) */
 .main:has(> .prep) { max-width: none; padding: 0; }

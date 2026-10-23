@@ -14,7 +14,7 @@ import { TemplateValuePicker } from '../components/Templates'
 import { ErrorBox, Field, Loading, Spinner, useToast } from '../components/ui'
 import { bindingId, bindingValue, useDatasets } from '../datasets'
 import { groupOf, layoutMain, shiftOnDelete, shiftOnInsert } from '../groups'
-import type { Cell, Collection, ColumnSchema, Recipe, RecipeDetail, Run, Selection, Source, Step, StepGroup, TransformPreview } from '../types'
+import type { Cell, Collection, ColumnSchema, ColumnValues, Recipe, RecipeDetail, Run, Selection, Source, Step, StepGroup, TransformPreview } from '../types'
 
 const OP_HELP: Record<string, string> = {
   select_columns: 'Keep, drop or reorder columns',
@@ -390,8 +390,7 @@ export default function Studio() {
   const quickFilter = (column: string, value: Cell, keep: boolean) => {
     const branch = viewRole ?? undefined
     const at = sel.kind === 'step' ? sel.i + 1 : sel.kind === 'output' ? recipe.steps.length : 0
-    const operator = value === null ? (keep ? 'is_blank' : 'not_blank') : keep ? 'eq' : 'ne'
-    insertStep(at, { op: 'filter_rows', match: 'all', conditions: [{ column, operator, value }] }, branch)
+    insertStep(at, { op: 'filter_rows', match: 'all', conditions: [{ column, operator: keep ? 'in' : 'not_in', value: [value] }] }, branch)
   }
 
   const withExpected = (): Recipe => ({
@@ -731,7 +730,8 @@ export default function Studio() {
                 {!branch && groupOf(groups, i) && (
                   <div className="faint small">In group <a href="#" onClick={(e) => { e.preventDefault(); setSel({ kind: 'group', id: groupOf(groups, i)!.id }) }}>{groupOf(groups, i)!.name}</a></div>
                 )}
-                <StepEditor step={s} cols={colsBefore(i, branch)} roleCols={roleCols} roles={roles} base={recipe.base} onChange={update} />
+                <StepEditor step={s} cols={colsBefore(i, branch)} roleCols={roleCols} roles={roles} base={recipe.base} onChange={update}
+                  columnValues={allBound ? (column) => api.post<ColumnValues>('/api/transform/column-values', { recipe, bindings, column, before: i, branch }) : undefined} />
                 {(s.op === 'join' || s.op === 'append_rows') && roles.length < 2 && (
                   <div className="alert info small">This step needs a second table. <a href="#" onClick={(e) => { e.preventDefault(); setAddData({}) }}>Add data</a></div>
                 )}

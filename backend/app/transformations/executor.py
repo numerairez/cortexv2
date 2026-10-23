@@ -78,15 +78,34 @@ def _coerce_value(series: pd.Series, value: Any) -> Any:
 def _condition_mask(df: pd.DataFrame, c) -> pd.Series:
     s = df[c.column]
     op = c.operator
+    blank = s.isna() | (s.astype(str).str.strip() == "")
     if op == "is_blank":
-        return s.isna() | (s.astype(str).str.strip() == "")
+        return blank
     if op == "not_blank":
-        return ~(s.isna() | (s.astype(str).str.strip() == ""))
+        return ~blank
     if op in ("in", "not_in"):
         vals = c.value if isinstance(c.value, list) else [c.value]
-        vals = [_coerce_value(s, v) for v in vals]
-        m = s.isin(vals)
+        picked = [_coerce_value(s, v) for v in vals if v is not None]
+        if pd.api.types.is_object_dtype(s):
+            # Mixed text/number columns: match on the text form, as the values were picked from it.
+            m = s.map(lambda x: None if x is None else str(x)).isin([str(v) for v in picked])
+        else:
+            m = s.isin(picked)
+        if len(picked) < len(vals):
+            m = m | blank
         return m if op == "in" else ~m
+    if op == "between":
+        lo, hi = ([*c.value, None, None][:2] if isinstance(c.value, list) else (None, None))
+        m = pd.Series(True, index=s.index)
+        try:
+            if lo not in (None, ""):
+                m &= s >= _coerce_value(s, lo)
+            if hi not in (None, ""):
+                m &= s <= _coerce_value(s, hi)
+        except TypeError:
+            raise ValueError(f"Cannot compare column '{c.column}' with '{c.value}'; convert the column type first")
+        m = m.fillna(False).astype(bool)
+        return m | blank if c.keep_blanks else m
     if op in ("contains", "not_contains", "starts_with"):
         txt = s.astype(object).map(lambda v: "" if v is None or (isinstance(v, float) and np.isnan(v)) else str(v))
         needle = str(c.value or "")
@@ -108,8 +127,14 @@ def _condition_mask(df: pd.DataFrame, c) -> pd.Series:
     return m.fillna(False).astype(bool)
 
 
+NOT_SET_UP = "Not set up yet ({}) — the data passes through unchanged"
+
+
 def _filter(df, step: FilterRows, tables, rep):
     _require(df, [c.column for c in step.conditions])
+    if not step.conditions:
+        rep.details["removed_rows"] = 0
+        return df
     masks = [_condition_mask(df, c) for c in step.conditions]
     mask = masks[0]
     for m in masks[1:]:
@@ -147,6 +172,9 @@ def _sort(df, step: SortRows, tables, rep):
 
 
 def _append(df, step: AppendRows, tables, rep):
+    if not step.inputs:
+        rep.warnings.append(NOT_SET_UP.format("choose a table to append"))
+        return df
     frames = [df]
     for role in step.inputs:
         if role not in tables:
@@ -180,6 +208,9 @@ def _key_kind(s: pd.Series) -> str:
 
 
 def _join(df, step: Join, tables, rep):
+    if not step.right or not step.left_on:
+        rep.warnings.append(NOT_SET_UP.format("choose the table and the columns to match on"))
+        return df
     if step.right not in tables:
         raise ValueError(f"Unknown input '{step.right}'")
     right = tables[step.right]
@@ -242,6 +273,8 @@ _BOOL_MAP = {"true": True, "yes": True, "y": True, "1": True, "false": False, "n
 
 
 def _convert(df, step: ConvertTypes, tables, rep):
+    if not step.conversions:
+        return df
     _require(df, [c.column for c in step.conversions])
     df = df.copy()
     failures: dict[str, int] = {}
@@ -287,6 +320,9 @@ def _convert(df, step: ConvertTypes, tables, rep):
 
 
 def _derive(df, step: DeriveColumn, tables, rep):
+    if not step.expression.strip():
+        rep.warnings.append(NOT_SET_UP.format("enter a formula"))
+        return df
     try:
         values = expressions.evaluate(step.expression, df)
     except expressions.ExpressionError as e:
@@ -314,6 +350,11 @@ def _check_agg_type(df, column, fn):
 
 def _group(df, step: GroupAggregate, tables, rep):
     _require(df, step.group_by + [a.column for a in step.aggregations])
+    if not step.aggregations:
+        if not step.group_by:
+            rep.warnings.append(NOT_SET_UP.format("choose columns to group by or a calculation"))
+            return df
+        return df[step.group_by].drop_duplicates()
     named = {}
     for a in step.aggregations:
         _check_agg_type(df, a.column, a.function)
@@ -332,6 +373,9 @@ def _group(df, step: GroupAggregate, tables, rep):
 
 
 def _pivot(df, step: Pivot, tables, rep):
+    if not (step.index and step.columns and step.values):
+        rep.warnings.append(NOT_SET_UP.format("choose the rows, columns and values"))
+        return df
     _require(df, step.index + [step.columns, step.values])
     if step.columns in step.index or step.values in step.index or step.columns == step.values:
         raise ValueError("Pivot row, column, and value fields must all be different columns")

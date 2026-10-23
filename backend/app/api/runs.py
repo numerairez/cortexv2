@@ -44,6 +44,14 @@ class TransformBody(BaseModel):
     recipe_id: str | None = None
 
 
+class ColumnValuesBody(BaseModel):
+    recipe: dict
+    bindings: dict[str, str]
+    column: str
+    before: int = 0
+    branch: str | None = None
+
+
 class RecipeBody(BaseModel):
     name: str
     description: str = ""
@@ -178,6 +186,12 @@ def validate_recipe(body: dict):
 def transform_preview(body: TransformBody):
     recipe = transformation.parse_recipe(body.recipe)
     return transformation.preview(recipe, body.bindings, body.upto, view_role=body.view_role)
+
+
+@router.post("/transform/column-values")
+def transform_column_values(body: ColumnValuesBody):
+    recipe = transformation.parse_recipe(body.recipe)
+    return transformation.column_values(recipe, body.bindings, body.column, body.before, body.branch)
 
 
 @router.post("/transform/run")

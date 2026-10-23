@@ -110,6 +110,39 @@ def column_profiles(df: pd.DataFrame, max_columns: int = 80, top: int = 8, bins:
     return out
 
 
+def column_values(recipe: Recipe, bindings: dict[str, str], column: str, before: int = 0,
+                  branch: str | None = None, limit: int = 1000, bins: int = 24) -> dict:
+    """What a filter can pick from: the distinct values (with counts) and, for numbers and dates,
+    the range and a histogram of ``column`` as it enters step ``before`` of the main flow, or of
+    input ``branch``'s own steps."""
+    tables, _ = load_bindings(bindings)
+    try:
+        if branch:
+            df = executor.execute(recipe, tables, branch_stop=(branch, before - 1)).df
+        else:
+            df = executor.execute(recipe, tables, stop_after=before - 1).df
+    except executor.StepError as e:
+        return {"type": "unknown", "values": [], "error": e.message}
+    if column not in df.columns:
+        return {"type": "unknown", "values": [], "error": f"Column '{column}' is not available at this step"}
+    s = df[column]
+    kind = tabular.column_type(s)
+    nonnull = s.dropna()
+    vc = nonnull.value_counts()
+    out: dict[str, Any] = {"type": kind, "count": int(len(s)), "nulls": int(s.isna().sum()),
+                           "distinct": int(len(vc)), "truncated": len(vc) > limit,
+                           "values": [{"value": tabular.to_json_value(k), "count": int(v)} for k, v in vc.head(limit).items()]}
+    if kind in ("integer", "number", "date") and len(nonnull):
+        vals = nonnull.astype("datetime64[ns]").astype("int64") if kind == "date" else pd.to_numeric(nonnull)
+        arr = vals.to_numpy(dtype="float64")
+        fmt = (lambda v: pd.Timestamp(int(v)).date().isoformat()) if kind == "date" else \
+            (lambda v: int(v) if kind == "integer" and float(v).is_integer() else float(v))
+        counts, edges = np.histogram(arr, bins=bins)
+        out["min"], out["max"] = fmt(arr.min()), fmt(arr.max())
+        out["bins"] = [{"from": fmt(edges[i]), "to": fmt(edges[i + 1]), "count": int(n)} for i, n in enumerate(counts)]
+    return out
+
+
 def preview(recipe: Recipe, bindings: dict[str, str], upto: int | None = None, limit: int = 200,
             view_role: str | None = None) -> dict:
     """Report on every step (input branches and main flow) and return a data preview:
@@ -376,7 +409,7 @@ def operations_section() -> list[str]:
     lines += [
         "",
         "Notes:",
-        "- filter operators: eq, ne, gt, ge, lt, le, contains, not_contains, starts_with, in, not_in, is_blank, not_blank",
+        "- filter operators: eq, ne, gt, ge, lt, le, contains, not_contains, starts_with, in, not_in, between (value [low, high]), is_blank, not_blank",
         "- join.expected: many_to_one (lookup), one_to_one, one_to_many, many_to_many; join.how: left, inner, right, outer",
         "- derive_column expressions reference columns in [square brackets] and may use + - * /, comparisons, "
         "and/or/not, and functions round, abs, upper, lower, trim, len, concat, if, coalesce, year, month, day, isblank",

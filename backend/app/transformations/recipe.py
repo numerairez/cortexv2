@@ -27,20 +27,22 @@ class RenameColumns(_Step):
 
 
 FilterOperator = Literal["eq", "ne", "gt", "ge", "lt", "le", "contains", "not_contains", "starts_with",
-                         "in", "not_in", "is_blank", "not_blank"]
+                         "in", "not_in", "between", "is_blank", "not_blank"]
 
 
 class Condition(BaseModel):
     model_config = ConfigDict(extra="forbid")
     column: ColumnName
     operator: FilterOperator
-    value: str | int | float | bool | list[str | int | float] | None = None
+    # in/not_in: a list (None in it stands for blanks); between: [low, high], either may be None.
+    value: str | int | float | bool | list[str | int | float | bool | None] | None = None
+    keep_blanks: bool = False   # between: also keep blank cells once a bound is set
 
 
 class FilterRows(_Step):
     op: Literal["filter_rows"]
     match: Literal["all", "any"] = "all"
-    conditions: list[Condition] = Field(min_length=1)
+    conditions: list[Condition] = Field(default_factory=list)   # empty keeps every row
 
 
 class SortKey(BaseModel):
@@ -56,19 +58,28 @@ class SortRows(_Step):
 
 class AppendRows(_Step):
     op: Literal["append_rows"]
-    inputs: list[str] = Field(min_length=1)
+    inputs: list[str] = Field(default_factory=list)   # empty: not set up yet, passes through
     allow_missing_columns: bool = False
 
 
 class Join(_Step):
     op: Literal["join"]
-    right: str
-    left_on: list[ColumnName] = Field(min_length=1)
-    right_on: list[ColumnName] = Field(min_length=1)
+    right: str = ""
+    left_on: list[ColumnName] = Field(default_factory=list)   # no right/keys yet: not set up, passes through
+    right_on: list[ColumnName] = Field(default_factory=list)
     how: Literal["left", "inner", "right", "outer"] = "left"
     expected: Literal["many_to_one", "one_to_one", "one_to_many", "many_to_many"] = "many_to_one"
     right_columns: list[ColumnName] | None = None
     suffix: str = " (right)"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _drop_unfinished_keys(cls, data):
+        # Key pairs where either side is still "Choose column…" are not set up yet.
+        if isinstance(data, dict) and isinstance(data.get("left_on"), list) and isinstance(data.get("right_on"), list):
+            pairs = [(lk, rk) for lk, rk in zip(data["left_on"], data["right_on"]) if lk and rk]
+            data = {**data, "left_on": [p[0] for p in pairs], "right_on": [p[1] for p in pairs]}
+        return data
 
     @field_validator("right_on")
     @classmethod
@@ -95,14 +106,14 @@ class Conversion(BaseModel):
 
 class ConvertTypes(_Step):
     op: Literal["convert_types"]
-    conversions: list[Conversion] = Field(min_length=1)
+    conversions: list[Conversion] = Field(default_factory=list)
     on_error: Literal["blank", "fail"] = "blank"
 
 
 class DeriveColumn(_Step):
     op: Literal["derive_column"]
     name: ColumnName
-    expression: str = Field(min_length=1, max_length=1000)
+    expression: str = Field(default="", max_length=1000)   # blank: not set up yet, passes through
 
 
 Aggregate = Literal["sum", "mean", "median", "min", "max", "count", "count_distinct", "first", "last"]
@@ -119,20 +130,20 @@ class GroupAggregate(_Step):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     op: Literal["group_aggregate"]
     group_by: list[ColumnName] = Field(default_factory=list)
-    aggregations: list[Aggregation] = Field(min_length=1)
+    aggregations: list[Aggregation] = Field(default_factory=list)
 
 
 class Pivot(_Step):
     op: Literal["pivot"]
-    index: list[ColumnName] = Field(min_length=1)
-    columns: ColumnName
-    values: ColumnName
+    index: list[ColumnName] = Field(default_factory=list)   # any field missing: not set up, passes through
+    columns: str = ""
+    values: str = ""
     function: Aggregate = "sum"
 
 
 class Unpivot(_Step):
     op: Literal["unpivot"]
-    id_columns: list[ColumnName] = Field(min_length=1)
+    id_columns: list[ColumnName] = Field(default_factory=list)
     value_columns: list[ColumnName] | None = None
     variable_name: ColumnName = "Attribute"
     value_name: ColumnName = "Value"

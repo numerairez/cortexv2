@@ -38,6 +38,20 @@ export interface ColumnSchema {
   type: string
 }
 
+/** What a filter can pick from: a column's values as they enter a step. */
+export interface ColumnValues {
+  type: string
+  count?: number
+  nulls?: number
+  distinct?: number
+  truncated?: boolean
+  values: { value: Cell; count: number }[]
+  min?: number | string
+  max?: number | string
+  bins?: { from: number | string; to: number | string; count: number }[]
+  error?: string
+}
+
 export interface Selection {
   id: string
   source_id: string

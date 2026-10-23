@@ -179,3 +179,41 @@ def test_groups_are_validated_and_do_not_change_results(files):
                      ([{"id": "a", "name": "A", "start": 0, "end": 0, "inputs": ["nope"]}], "unknown input")]:
         with pytest.raises(Exception, match=msg):
             Recipe.model_validate({**base, "groups": bad})
+
+
+def test_filter_defaults_keep_everything_and_ranges():
+    df = pd.DataFrame({"Region": ["Luzon", "Visayas", None, "Mindanao"], "Qty": [1, 5, 10, None]})
+    t = {"t": df}
+
+    def run(conditions, match="all"):
+        r = Recipe.model_validate({"inputs": [{"role": "t"}], "base": "t",
+                                   "steps": [{"op": "filter_rows", "match": match, "conditions": conditions}]})
+        return executor.execute(r, t).df
+
+    # A fresh filter (no conditions, empty exclusion list, open range) keeps every row, blanks included.
+    assert len(run([])) == 4
+    assert len(run([{"column": "Region", "operator": "not_in", "value": []}])) == 4
+    assert len(run([{"column": "Qty", "operator": "between", "value": [None, None]}])) == 4
+    assert run([{"column": "Qty", "operator": "between", "value": [2, None]}])["Qty"].tolist() == [5, 10]
+    assert run([{"column": "Qty", "operator": "between", "value": [None, 5]}])["Qty"].tolist() == [1, 5]
+    # None in a picked list stands for blanks.
+    assert run([{"column": "Region", "operator": "not_in", "value": [None, "Visayas"]}])["Region"].tolist() == ["Luzon", "Mindanao"]
+    assert len(run([{"column": "Region", "operator": "in", "value": [None]}])) == 1
+    assert run([{"column": "Qty", "operator": "between", "value": [2, None], "keep_blanks": True}])["Qty"].tolist()[:2] == [5, 10]
+    assert len(run([{"column": "Qty", "operator": "between", "value": [2, None], "keep_blanks": True}])) == 3
+
+
+@pytest.mark.parametrize("step", [
+    {"op": "join", "right": "", "left_on": [""], "right_on": [""]},
+    {"op": "join", "right": "t", "left_on": [""], "right_on": [""]},
+    {"op": "append_rows", "inputs": []},
+    {"op": "derive_column", "name": "New column", "expression": ""},
+    {"op": "pivot", "index": [], "columns": "", "values": ""},
+    {"op": "convert_types", "conversions": []},
+    {"op": "group_aggregate", "group_by": [], "aggregations": []},
+])
+def test_untouched_steps_pass_data_through(step):
+    df = pd.DataFrame({"A": ["x", "y"], "B": [1, 2]})
+    r = Recipe.model_validate({"inputs": [{"role": "t"}], "base": "t", "steps": [step]})
+    res = executor.execute(r, {"t": df})
+    assert res.df.equals(df)

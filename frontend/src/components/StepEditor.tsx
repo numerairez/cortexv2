@@ -1,4 +1,5 @@
-import type { ColumnSchema, Step } from '../types'
+import { useEffect, useRef, useState } from 'react'
+import type { Cell, ColumnSchema, ColumnValues, Step } from '../types'
 
 type Cols = ColumnSchema[]
 type Rec = Record<string, unknown>
@@ -12,28 +13,63 @@ export const OP_LABEL: Record<string, string> = {
 const OPERATORS: [string, string][] = [
   ['eq', 'equals'], ['ne', 'does not equal'], ['gt', 'greater than'], ['ge', 'at least'], ['lt', 'less than'], ['le', 'at most'],
   ['contains', 'contains'], ['not_contains', 'does not contain'], ['starts_with', 'starts with'], ['in', 'is one of'],
-  ['not_in', 'is not one of'], ['is_blank', 'is blank'], ['not_blank', 'is not blank'],
+  ['not_in', 'is not one of'], ['between', 'is between'], ['is_blank', 'is blank'], ['not_blank', 'is not blank'],
 ]
 const AGGS = ['sum', 'mean', 'median', 'min', 'max', 'count', 'count_distinct', 'first', 'last']
+const isRange = (type?: string) => type === 'number' || type === 'integer' || type === 'date'
+const isSet = (v: unknown) => v !== null && v !== undefined && v !== ''
+
+/** A filter condition that keeps every row: an open range for numbers/dates, no excluded values otherwise. */
+export function keepAll(col?: ColumnSchema): Rec {
+  const column = col?.name ?? ''
+  return isRange(col?.type) ? { column, operator: 'between', value: [null, null], keep_blanks: true } : { column, operator: 'not_in', value: [] }
+}
+
+/** What a filter condition keeps, without the column name: "all values", "not A/B", "10–20", … */
+function describeCondition(c: Rec): string {
+  const op = String(c.operator)
+  const list = Array.isArray(c.value) ? (c.value as Cell[]) : []
+  const shown = (v: unknown) => (v === null || v === undefined ? '(blank)' : String(v))
+  const vals = list.length > 3 ? `${list.length} values` : list.map(shown).join(', ')
+  if (op === 'not_in') return list.length ? `all except ${vals}` : 'all values'
+  if (op === 'in') return list.length ? `only ${vals}` : 'no values'
+  if (op === 'between') {
+    const [lo, hi] = list
+    if (isSet(lo) && isSet(hi)) return `${lo} – ${hi}`
+    if (isSet(lo)) return `at least ${lo}`
+    if (isSet(hi)) return `at most ${hi}`
+    return 'all values'
+  }
+  const label = OPERATORS.find((o) => o[0] === op)?.[1] ?? op
+  return ['is_blank', 'not_blank'].includes(op) ? label : `${label} "${shown(c.value)}"`
+}
+
+function conditionSummary(c: Rec): string {
+  return `${c.column}: ${describeCondition(c)}`
+}
 const AGG_LABEL: Record<string, string> = { mean: 'average', count_distinct: 'count distinct' }
 
-/** A sensible starting configuration for a newly added step. */
+const SAME_TYPE: Record<string, string> = { integer: 'integer', number: 'number', date: 'date', boolean: 'boolean' }
+
+/** A starting configuration for a newly added step. Untouched, every step either changes nothing or
+ *  waits to be set up (passing the data through) — never an error. */
 export function newStep(op: string, cols: Cols, roles: string[], base: string): Step {
   const first = cols[0]?.name ?? ''
-  const num = cols.find((c) => c.type === 'number' || c.type === 'integer')?.name ?? first
+  const num = cols.slice(1).find((c) => c.type === 'number' || c.type === 'integer')?.name
   const otherRole = roles.find((r) => r !== base) ?? ''
   switch (op) {
     case 'select_columns': return { op, columns: cols.map((c) => c.name) }
     case 'rename_columns': return { op, mapping: { [first]: first } }
-    case 'filter_rows': return { op, match: 'all', conditions: [{ column: first, operator: 'eq', value: '' }] }
+    case 'filter_rows': return { op, match: 'all', conditions: [keepAll(cols[0])] }
     case 'sort_rows': return { op, keys: [{ column: first, descending: false }] }
-    case 'append_rows': return { op, inputs: otherRole ? [otherRole] : [], allow_missing_columns: false }
-    case 'join': return { op, right: otherRole, left_on: [first], right_on: [''], how: 'left', expected: 'many_to_one' }
-    case 'deduplicate': return { op, columns: [first], keep: 'first' }
-    case 'convert_types': return { op, conversions: [{ column: first, to: 'number' }], on_error: 'blank' }
+    case 'append_rows': return { op, inputs: otherRole ? [otherRole] : [], allow_missing_columns: true }
+    case 'join': return { op, right: otherRole, left_on: [''], right_on: [''], how: 'left', expected: 'many_to_one' }
+    case 'deduplicate': return { op, keep: 'first' }
+    // Converts the first column to the type it already has, so nothing changes until the user picks one.
+    case 'convert_types': return { op, conversions: [{ column: first, to: SAME_TYPE[cols[0]?.type ?? ''] ?? 'text' }], on_error: 'blank' }
     case 'derive_column': return { op, name: 'New column', expression: '' }
-    case 'group_aggregate': return { op, group_by: [first], aggregations: [{ column: num, function: 'sum', as: `Total ${num}` }] }
-    case 'pivot': return { op, index: [first], columns: cols[1]?.name ?? first, values: num, function: 'sum' }
+    case 'group_aggregate': return { op, group_by: [first], aggregations: [num ? { column: num, function: 'sum', as: `Total ${num}` } : { column: first, function: 'count', as: 'Rows' }] }
+    case 'pivot': return { op, index: [], columns: '', values: '', function: 'sum' }
     case 'unpivot': return { op, id_columns: [first], variable_name: 'Attribute', value_name: 'Value' }
     default: return { op }
   }
@@ -45,15 +81,18 @@ export function stepSummary(s: Step): string {
   switch (s.op) {
     case 'select_columns': return `${(a.columns as string[]).length} column(s)`
     case 'rename_columns': return Object.entries(a.mapping as Rec).map(([k, v]) => `${k} → ${v}`).join(', ')
-    case 'filter_rows': return (a.conditions as Rec[]).map((c) => `${c.column} ${OPERATORS.find((o) => o[0] === c.operator)?.[1] ?? c.operator}${['is_blank', 'not_blank'].includes(String(c.operator)) ? '' : ` ${Array.isArray(c.value) ? c.value.join('/') : c.value}`}`).join(a.match === 'any' ? ' OR ' : ' AND ')
+    case 'filter_rows': return (a.conditions as Rec[]).map(conditionSummary).join(a.match === 'any' ? ' OR ' : ' AND ') || 'all rows'
     case 'sort_rows': return (a.keys as Rec[]).map((k) => `${k.column}${k.descending ? ' ↓' : ' ↑'}`).join(', ')
-    case 'append_rows': return `+ ${list(a.inputs)}`
-    case 'join': return `${a.how} join ${a.right} on ${list(a.left_on)} = ${list(a.right_on)}`
+    case 'append_rows': return (a.inputs as string[]).length ? `+ ${list(a.inputs)}` : 'not set up yet'
+    case 'join': {
+      const keys = (a.left_on as string[]).map((l, i) => [l, (a.right_on as string[])[i]]).filter(([l, r]) => l && r)
+      return a.right && keys.length ? `${a.how} join ${a.right} on ${keys.map(([l, r]) => (l === r ? l : `${l} = ${r}`)).join(', ')}` : 'not set up yet'
+    }
     case 'deduplicate': return a.columns ? `by ${list(a.columns)}` : 'identical rows'
-    case 'convert_types': return (a.conversions as Rec[]).map((c) => `${c.column} → ${c.to}`).join(', ')
-    case 'derive_column': return `${a.name} = ${a.expression}`
+    case 'convert_types': return (a.conversions as Rec[]).map((c) => `${c.column} → ${c.to}`).join(', ') || 'no conversions'
+    case 'derive_column': return String(a.expression).trim() ? `${a.name} = ${a.expression}` : 'not set up yet'
     case 'group_aggregate': return `by ${list(a.group_by) || '(all rows)'}: ${(a.aggregations as Rec[]).map((g) => `${AGG_LABEL[String(g.function)] ?? g.function}(${g.column})`).join(', ')}`
-    case 'pivot': return `${a.values} by ${list(a.index)} × ${a.columns}`
+    case 'pivot': return a.values && a.columns && (a.index as string[]).length ? `${a.values} by ${list(a.index)} × ${a.columns}` : 'not set up yet'
     case 'unpivot': return `keep ${list(a.id_columns)}`
     default: return ''
   }
@@ -96,8 +135,236 @@ function L({ label, children }: { label: string; children: React.ReactNode }) {
   return <label className="field"><span className="label small">{label}</span>{children}</label>
 }
 
-export function StepEditor({ step, cols, roleCols, roles, base, onChange }: {
+type ValuesLoader = (column: string) => Promise<ColumnValues>
+
+const WILDCARD_OPS: [string, string, string | null][] = [   // [operator, label, its "exclude" form]
+  ['contains', 'Contains', 'not_contains'], ['starts_with', 'Starts with', null], ['eq', 'Exactly matches', 'ne'],
+]
+const WILDCARD_EXCLUDED: Record<string, string> = { not_contains: 'contains', ne: 'eq' }
+
+function Tabs({ tabs, value, onChange }: { tabs: [string, string][]; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="seg-tabs" role="tablist">
+      {tabs.map(([v, l]) => <button key={v} role="tab" aria-selected={v === value} className={v === value ? 'on' : ''} onClick={() => v !== value && onChange(v)}>{l}</button>)}
+    </div>
+  )
+}
+
+/** One filter condition, laid out like Tableau's filter dialog: pick values from a list, or a range for numbers and dates. */
+function FilterCondition({ cond, cols, load, defaultOpen, onChange, onRemove }: {
+  cond: Rec; cols: Cols; load?: ValuesLoader; defaultOpen?: boolean; onChange: (patch: Rec) => void; onRemove: () => void
+}) {
+  const [open, setOpen] = useState(!!defaultOpen)
+  const column = String(cond.column)
+  const col = cols.find((c) => c.name === column)
+  const range = isRange(col?.type)
+  const op = String(cond.operator)
+  const bounds = Array.isArray(cond.value) ? (cond.value as unknown[]) : []
+  const [info, setInfo] = useState<ColumnValues | null>(null)
+  const [rangeMode, setRangeMode] = useState(() => (isSet(bounds[0]) && !isSet(bounds[1]) ? 'min' : !isSet(bounds[0]) && isSet(bounds[1]) ? 'max' : 'range'))
+  const loadRef = useRef(load)
+  loadRef.current = load
+  const canLoad = !!load
+  const loadedFor = useRef<string | null>(null)
+  useEffect(() => {
+    if (!open || loadedFor.current === column) return
+    loadedFor.current = column
+    setInfo(null)
+    if (!column || !loadRef.current) return
+    let live = true
+    loadRef.current(column)
+      .then((v) => { if (live) setInfo(v) })
+      .catch((e: Error) => { if (live) setInfo({ type: 'unknown', values: [], error: e.message }) })
+    return () => { live = false; loadedFor.current = null }
+  }, [column, canLoad, open])
+
+  const tab = ['in', 'not_in'].includes(op) ? 'values'
+    : op === 'between' ? rangeMode
+      : !range && (op in WILDCARD_EXCLUDED || WILDCARD_OPS.some((w) => w[0] === op)) ? 'wildcard' : 'other'
+  const tabs: [string, string][] = range
+    ? [['range', 'Range'], ['min', 'At least'], ['max', 'At most'], ['values', 'Values']]
+    : [['values', 'Values'], ['wildcard', 'Wildcard']]
+  const setTab = (t: string) => {
+    if (t === 'values') return onChange({ operator: 'not_in', value: [] })
+    if (t === 'wildcard') return onChange({ operator: 'contains', value: '' })
+    setRangeMode(t)
+    const [lo, hi] = op === 'between' ? bounds : [null, null]
+    onChange({ operator: 'between', value: t === 'min' ? [lo ?? null, null] : t === 'max' ? [null, hi ?? null] : [lo ?? null, hi ?? null], keep_blanks: cond.keep_blanks ?? true })
+  }
+
+  return (
+    <div className={`filter-cond${open ? ' open' : ''}`}>
+      <div className="cond-head">
+        <button className="ghost icon chevron" onClick={() => setOpen(!open)} aria-expanded={open} aria-label={open ? 'Collapse' : 'Expand'}>{open ? '▾' : '▸'}</button>
+        {open ? (
+          <select className="col-pick" value={column} onChange={(e) => { setRangeMode('range'); onChange(keepAll(cols.find((c) => c.name === e.target.value))) }} aria-label="Column">
+            {!col && <option value={column}>{column || 'Choose column…'}{column ? ' (not found)' : ''}</option>}
+            {cols.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}
+          </select>
+        ) : (
+          <button className="ghost summary-line" onClick={() => setOpen(true)} title={conditionSummary(cond)}>
+            <span className="col">{column || 'Choose column…'}</span><span className="desc">{describeCondition(cond)}</span>
+          </button>
+        )}
+        <button className="ghost icon" onClick={onRemove} aria-label="Remove condition" title="Remove condition">✕</button>
+      </div>
+      {open && <>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
+      {tab === 'values' ? <ValuePicker cond={cond} info={info} loading={canLoad && !info} onChange={onChange} />
+        : op === 'between' ? <RangeFilter cond={cond} mode={rangeMode} type={col?.type} info={info} onChange={onChange} />
+          : tab === 'wildcard' ? <Wildcard cond={cond} onChange={onChange} />
+            : (
+              <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+                <span className="small nowrap">{OPERATORS.find((o) => o[0] === op)?.[1] ?? op}</span>
+                {!['is_blank', 'not_blank'].includes(op) && <input value={String(cond.value ?? '')} aria-label="Value" onChange={(e) => onChange({ value: e.target.value })} />}
+              </div>
+            )}
+      </>}
+    </div>
+  )
+}
+
+function Wildcard({ cond, onChange }: { cond: Rec; onChange: (patch: Rec) => void }) {
+  const op = String(cond.operator)
+  const excluded = op in WILDCARD_EXCLUDED
+  const base = WILDCARD_EXCLUDED[op] ?? op
+  const negate = (b: string, ex: boolean) => (ex ? WILDCARD_OPS.find((w) => w[0] === b)?.[2] ?? b : b)
+  return (
+    <div>
+      <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+        <select className="inline-input" value={base} onChange={(e) => onChange({ operator: negate(e.target.value, excluded) })} aria-label="Match">
+          {WILDCARD_OPS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <input value={String(cond.value ?? '')} placeholder="Text" aria-label="Text" onChange={(e) => onChange({ value: e.target.value })} />
+      </div>
+      <label className="check small">
+        <input type="checkbox" checked={excluded} disabled={!WILDCARD_OPS.find((w) => w[0] === base)?.[2]} onChange={(e) => onChange({ operator: negate(base, e.target.checked) })} /> Exclude
+      </label>
+    </div>
+  )
+}
+
+/** Checklist with an "(All)" row. Stores whichever list is shorter — the unticked values (not_in) or
+ *  the ticked ones (in) — so "everything" is an empty exclusion list and new values pass through. */
+function ValuePicker({ cond, info, loading, onChange }: { cond: Rec; info: ColumnValues | null; loading: boolean; onChange: (patch: Rec) => void }) {
+  const [q, setQ] = useState('')
+  const exclude = cond.operator === 'not_in'
+  const list = (Array.isArray(cond.value) ? cond.value : []) as Cell[]
+  const key = (v: Cell) => (v === null ? '\u0000blank' : String(v))
+  const display = (v: Cell) => (v === null ? '(Blank)' : String(v))
+
+  if (!info || !info.values.length) {
+    // No values to offer (data not bound yet, or the column could not be read): type them instead.
+    return (
+      <div>
+        <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+          <select className="inline-input" value={exclude ? 'not_in' : 'in'} onChange={(e) => onChange({ operator: e.target.value })} aria-label="Mode">
+            <option value="not_in">All except</option><option value="in">Only</option>
+          </select>
+          <input value={list.filter((v) => v !== null).join(', ')} placeholder={exclude ? 'nothing excluded' : 'a, b, c'} aria-label="Values"
+            onChange={(e) => onChange({ value: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+        </div>
+        {loading ? <div className="faint small">Loading values…</div> : info?.error && <div className="faint small">{info.error}</div>}
+      </div>
+    )
+  }
+
+  const opts = [...info.values].sort((x, y) => String(x.value).localeCompare(String(y.value), undefined, { numeric: true }))
+  if (info.nulls) opts.push({ value: null, count: info.nulls })
+  const all = opts.map((o) => o.value)
+  const listed = new Set(list.map(key))
+  const isOn = (v: Cell) => exclude !== listed.has(key(v))
+  const toggle = (vals: Cell[], on: boolean) => {
+    const next = new Map(list.map((v) => [key(v), v]))
+    for (const v of vals) { if (on !== exclude) next.set(key(v), v); else next.delete(key(v)) }
+    let picked = [...next.values()]
+    let mode = exclude
+    if (!info.truncated && picked.length > all.length / 2) { picked = all.filter((v) => !next.has(key(v))); mode = !mode }
+    onChange({ operator: mode ? 'not_in' : 'in', value: picked })
+  }
+  const needle = q.trim().toLowerCase()
+  const visible = needle ? opts.filter((o) => display(o.value).toLowerCase().includes(needle)) : opts
+  const onCount = all.filter(isOn).length
+  const allOn = visible.every((o) => isOn(o.value))
+  const someOn = visible.some((o) => isOn(o.value))
+  const setAll = (on: boolean) => (needle ? toggle(visible.map((o) => o.value), on) : onChange(on ? { operator: 'not_in', value: [] } : { operator: 'in', value: [] }))
+
+  return (
+    <div className="value-pick">
+      {opts.length > 8 && <input className="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" aria-label="Search values" />}
+      <div className="pick-list">
+        <label className="all">
+          <input type="checkbox" checked={allOn} ref={(el) => { if (el) el.indeterminate = someOn && !allOn }} onChange={(e) => setAll(e.target.checked)} />
+          <span className="v">(All)</span>
+        </label>
+        {visible.slice(0, 500).map((o) => (
+          <label key={key(o.value)}>
+            <input type="checkbox" checked={isOn(o.value)} onChange={(e) => toggle([o.value], e.target.checked)} />
+            <span className={`v${o.value === null ? ' muted' : ''}`} title={display(o.value)}>{display(o.value)}</span>
+            <span className="n">{o.count.toLocaleString()}</span>
+          </label>
+        ))}
+        {visible.length > 500 && <div className="faint small">Showing 500 of {visible.length.toLocaleString()} — search to narrow down.</div>}
+        {!visible.length && <div className="faint small">No matching values.</div>}
+      </div>
+      <div className="faint small">
+        {onCount.toLocaleString()} of {all.length.toLocaleString()}{info.truncated ? '+' : ''} selected
+        {info.truncated && ' · only the most common values are listed'}
+      </div>
+    </div>
+  )
+}
+
+/** Range / At least / At most over a two-handle slider; an empty bound means "no limit". */
+function RangeFilter({ cond, mode, type, info, onChange }: { cond: Rec; mode: string; type?: string; info: ColumnValues | null; onChange: (patch: Rec) => void }) {
+  const date = type === 'date'
+  const v = Array.isArray(cond.value) ? (cond.value as unknown[]) : []
+  const lo = v[0] ?? null
+  const hi = v[1] ?? null
+  const toNum = (x: unknown) => (date ? Date.parse(String(x).slice(0, 10)) / 864e5 : Number(x))
+  const ready = info?.min !== undefined && info?.max !== undefined
+  const min = ready ? toNum(info!.min) : 0
+  const max = ready ? toNum(info!.max) : 0
+  const step = date || type === 'integer' ? 1 : (max - min) / 200 || 1
+  const decimals = Math.max(0, Math.ceil(-Math.log10(step)))
+  const fromNum = (n: number) => (date ? new Date(Math.round(n) * 864e5).toISOString().slice(0, 10) : Number(n.toFixed(decimals)))
+  const loN = isSet(lo) ? Math.max(min, toNum(lo)) : min
+  const hiN = isSet(hi) ? Math.min(max, toNum(hi)) : max
+  const setBounds = (l: unknown, h: unknown) => onChange({ value: [l, h] })
+  const bound = (s: string) => (s === '' ? null : date ? s : Number(s))
+  const pct = (n: number) => (max > min ? ((n - min) / (max - min)) * 100 : 0)
+  const showLo = mode !== 'max'
+  const showHi = mode !== 'min'
+  const inputType = date ? 'date' : 'number'
+
+  return (
+    <div className="range-filter">
+      <div className="bounds">
+        {showLo ? <input type={inputType} value={String(lo ?? '')} placeholder={ready ? String(info!.min) : 'Minimum'} aria-label="At least" onChange={(e) => setBounds(bound(e.target.value), hi)} /> : <span />}
+        {showHi ? <input type={inputType} value={String(hi ?? '')} placeholder={ready ? String(info!.max) : 'Maximum'} aria-label="At most" onChange={(e) => setBounds(lo, bound(e.target.value))} /> : <span />}
+      </div>
+      {ready && max > min && (
+        <div className="slider">
+          <div className="fill" style={{ left: `${pct(showLo ? loN : min)}%`, right: `${100 - pct(showHi ? hiN : max)}%` }} />
+          {showLo && <input type="range" min={min} max={max} step={step} value={loN} aria-label="Minimum"
+            onChange={(e) => { const n = Number(e.target.value); setBounds(n <= min ? null : fromNum(Math.min(n, hiN)), hi) }} />}
+          {showHi && <input type="range" min={min} max={max} step={step} value={hiN} aria-label="Maximum"
+            onChange={(e) => { const n = Number(e.target.value); setBounds(lo, n >= max ? null : fromNum(Math.max(n, loN))) }} />}
+        </div>
+      )}
+      {(info?.nulls ?? 0) > 0 && (
+        <label className="check small">
+          <input type="checkbox" checked={cond.keep_blanks !== false} onChange={(e) => onChange({ keep_blanks: e.target.checked })} /> Include blanks
+        </label>
+      )}
+    </div>
+  )
+}
+
+export function StepEditor({ step, cols, roleCols, roles, base, onChange, columnValues }: {
   step: Step; cols: Cols; roleCols: Record<string, Cols>; roles: string[]; base: string; onChange: (s: Step) => void
+  /** Loads a column's values as they enter this step, for the filter's pickers. */
+  columnValues?: ValuesLoader
 }) {
   const a = step as Rec
   const set = (k: string, v: unknown) => onChange({ ...step, [k]: v })
@@ -107,6 +374,7 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange }: {
   const delRow = (key: string, i: number) => set(key, rows(key).filter((_, j) => j !== i))
   const del = (i: number, key: string) => <button className="ghost icon" onClick={() => delRow(key, i)} aria-label="Remove">✕</button>
   const otherRoles = roles.filter((r) => r !== base)
+  const [added, setAdded] = useState<number | null>(null)   // a filter condition just added opens expanded
 
   switch (step.op) {
     case 'select_columns':
@@ -133,35 +401,19 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange }: {
     case 'filter_rows':
       return (
         <div>
-          <div className="row" style={{ marginBottom: 8 }}>
-            <span className="small">Keep rows matching</span>
-            <select className="inline-input" value={String(a.match)} onChange={(e) => set('match', e.target.value)}>
-              <option value="all">all conditions</option><option value="any">any condition</option>
-            </select>
-          </div>
-          {rows('conditions').map((c, i) => {
-            const noValue = ['is_blank', 'not_blank'].includes(String(c.operator))
-            const multi = ['in', 'not_in'].includes(String(c.operator))
-            return (
-              <div className="cond-row" key={i}>
-                <ColumnSelect cols={cols} value={String(c.column)} onChange={(v) => setRow('conditions', i, { column: v })} />
-                <select value={String(c.operator)} onChange={(e) => setRow('conditions', i, { operator: e.target.value, value: ['in', 'not_in'].includes(e.target.value) ? [] : ['is_blank', 'not_blank'].includes(e.target.value) ? null : '' })} aria-label="Operator">
-                  {OPERATORS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-                </select>
-                {noValue ? <span /> : (
-                  <input
-                    value={multi ? (Array.isArray(c.value) ? (c.value as string[]).join(', ') : '') : String(c.value ?? '')}
-                    placeholder={multi ? 'a, b, c' : 'value'}
-                    onChange={(e) => setRow('conditions', i, { value: multi ? e.target.value.split(',').map((x) => x.trim()).filter(Boolean) : e.target.value })}
-                    aria-label="Value"
-                  />
-                )}
-                {del(i, 'conditions')}
-              </div>
-            )
-          })}
-          <button className="sm" onClick={() => addRow('conditions', { column: cols[0]?.name ?? '', operator: 'eq', value: '' })}>+ Condition</button>
-          <p className="faint small" style={{ marginTop: 6 }}>Text comparisons ignore upper/lower case. Numbers and dates are compared as values.</p>
+          {rows('conditions').length > 1 && (
+            <div className="row" style={{ marginBottom: 8 }}>
+              <span className="small">Keep rows matching</span>
+              <select className="inline-input" value={String(a.match)} onChange={(e) => set('match', e.target.value)}>
+                <option value="all">all conditions</option><option value="any">any condition</option>
+              </select>
+            </div>
+          )}
+          {rows('conditions').map((c, i) => (
+            <FilterCondition key={i} cond={c} cols={cols} load={columnValues} defaultOpen={i === added} onChange={(patch) => setRow('conditions', i, patch)} onRemove={() => delRow('conditions', i)} />
+          ))}
+          {!rows('conditions').length && <p className="faint small">No conditions — every row is kept.</p>}
+          <button className="ghost sm" onClick={() => { setAdded(rows('conditions').length); addRow('conditions', keepAll(cols[0])) }}>+ Add condition</button>
         </div>
       )
 
@@ -233,13 +485,13 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange }: {
             <span className="label small" style={{ fontWeight: 600 }}>Match on</span>
             {left.map((l, i) => (
               <div className="cond-row" key={i} style={{ gridTemplateColumns: '1fr auto 1fr auto' }}>
-                <ColumnSelect cols={cols} value={l} onChange={(v) => set('left_on', left.map((x, j) => (j === i ? v : x)))} />
+                <ColumnSelect cols={cols} value={l} allowEmpty onChange={(v) => set('left_on', left.map((x, j) => (j === i ? v : x)))} />
                 <span className="muted">=</span>
                 <ColumnSelect cols={rcols} value={rightOn[i] ?? ''} allowEmpty onChange={(v) => set('right_on', left.map((_, j) => (j === i ? v : rightOn[j] ?? '')))} />
                 <button className="ghost icon" disabled={left.length === 1} onClick={() => onChange({ ...step, left_on: left.filter((_, j) => j !== i), right_on: rightOn.filter((_, j) => j !== i) })} aria-label="Remove key">✕</button>
               </div>
             ))}
-            <button className="sm" onClick={() => onChange({ ...step, left_on: [...left, cols[0]?.name ?? ''], right_on: [...rightOn, ''] })}>+ Another key</button>
+            <button className="sm" onClick={() => onChange({ ...step, left_on: [...left, ''], right_on: [...rightOn, ''] })}>+ Another key</button>
           </div>
           <L label="Columns to bring in (empty = all)">
             <ColumnMulti cols={rcols.filter((c) => !rightOn.includes(c.name))} value={(a.right_columns as string[]) ?? []} onChange={(v) => set('right_columns', v.length ? v : undefined)} />
@@ -328,8 +580,8 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange }: {
       return (
         <div className="subgrid">
           <L label="Rows"><ColumnMulti cols={cols} value={a.index as string[]} onChange={(v) => set('index', v)} /></L>
-          <L label="Columns from values of"><ColumnSelect cols={cols} value={String(a.columns)} onChange={(v) => set('columns', v)} /></L>
-          <L label="Values"><ColumnSelect cols={cols} value={String(a.values)} onChange={(v) => set('values', v)} /></L>
+          <L label="Columns from values of"><ColumnSelect cols={cols} value={String(a.columns ?? '')} onChange={(v) => set('columns', v)} /></L>
+          <L label="Values"><ColumnSelect cols={cols} value={String(a.values ?? '')} onChange={(v) => set('values', v)} /></L>
           <L label="Combine with">
             <select value={String(a.function)} onChange={(e) => set('function', e.target.value)}>{AGGS.map((f) => <option key={f} value={f}>{AGG_LABEL[f] ?? f}</option>)}</select>
           </L>
