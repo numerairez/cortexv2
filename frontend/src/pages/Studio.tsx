@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type PointerEvent as RPointerEvent, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { api, uploadFile } from '../api'
@@ -38,7 +38,8 @@ const CATALOG: { group: string; ops: string[] }[] = [
 
 const COL_W = 150
 const LANE_H = 112
-const PAD_X = 56
+// Nodes are 124px wide and centred on their x, so this must exceed 62 or the first label clips.
+const PAD_X = 74
 const PAD_Y = 46
 
 /** A selected node. Steps with `branch` belong to that input's own row (prepared before the main flow). */
@@ -143,6 +144,9 @@ export default function Studio() {
   const [layout, setLayout] = useState<Layout>(loadLayout)
   const [zoom, setZoomState] = useState<number>(loadZoom)
   const canvasRef = useRef<HTMLDivElement>(null)
+  // Drag-to-pan offset of the whole flow, on top of normal scrolling.
+  const [pan, setPan] = useState({ x: 0, y: 0 })
+  const panDrag = useRef<{ id: number; x: number; y: number; px: number; py: number; moved: boolean } | null>(null)
   const [dropping, setDropping] = useState(false)
   // Step groups: which are expanded (UI only), and a Shift+click range of main-flow steps to group.
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
@@ -433,8 +437,8 @@ export default function Studio() {
       if (el && z !== cur) {
         const ax = anchor?.x ?? el.clientWidth / 2
         const ay = anchor?.y ?? el.clientHeight / 2
-        const left = ((el.scrollLeft + ax) * z) / cur - ax
-        const top = ((el.scrollTop + ay) * z) / cur - ay
+        const left = ((el.scrollLeft + ax - pan.x) * z) / cur - ax + pan.x
+        const top = ((el.scrollTop + ay - pan.y) * z) / cur - ay + pan.y
         requestAnimationFrame(() => el.scrollTo({ left, top }))
       }
       try { localStorage.setItem(ZOOM_KEY, String(z)) } catch { /* ignore */ }
@@ -446,8 +450,43 @@ export default function Studio() {
     const flow = el?.querySelector<HTMLElement>('.flow')
     if (!el || !flow) return
     const z = Math.min((el.clientWidth - 24) / flow.offsetWidth, (el.clientHeight - 12) / flow.offsetHeight, 1)
+    setPan({ x: 0, y: 0 })
     setZoom(z)
     requestAnimationFrame(() => el.scrollTo({ left: 0, top: 0 }))
+  }
+  // ---- pan: drag empty canvas to move the whole flow (nodes, buttons and menus keep their clicks)
+  const onPanDown = (e: RPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0 || (e.target as Element).closest('.flow-node, button, .flow-menu, input, select, textarea, a')) return
+    panDrag.current = { id: e.pointerId, x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, moved: false }
+  }
+  const onPanMove = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = panDrag.current
+    const el = canvasRef.current
+    if (!d || d.id !== e.pointerId || !el) return
+    const dx = e.clientX - d.x
+    const dy = e.clientY - d.y
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < 4) return
+      d.moved = true
+      el.setPointerCapture(e.pointerId)
+      el.classList.add('panning')
+    }
+    // Keep at least a strip of the flow on screen so it can't be lost off an edge.
+    const flow = el.querySelector<HTMLElement>('.flow-zoom')
+    const keep = 120
+    const fw = flow?.offsetWidth ?? 0
+    const fh = flow?.offsetHeight ?? 0
+    setPan({
+      x: Math.min(el.clientWidth - keep, Math.max(keep - fw, d.px + dx)),
+      y: Math.min(el.clientHeight - keep / 2, Math.max(keep / 2 - fh, d.py + dy)),
+    })
+  }
+  const onPanUp = (e: RPointerEvent<HTMLDivElement>) => {
+    const d = panDrag.current
+    if (!d || d.id !== e.pointerId) return
+    panDrag.current = null
+    canvasRef.current?.classList.remove('panning')
+    if (canvasRef.current?.hasPointerCapture(e.pointerId)) canvasRef.current.releasePointerCapture(e.pointerId)
   }
   // Ctrl + mouse wheel (and trackpad pinch, which browsers report as Ctrl + wheel) zooms the canvas.
   useEffect(() => {
@@ -598,6 +637,7 @@ export default function Studio() {
         onDragLeave={(e) => { if (e.currentTarget === e.target) setDropping(false) }}
         onDrop={(e) => { e.preventDefault(); setDropping(false); if (e.dataTransfer.files.length) dropFiles([...e.dataTransfer.files]) }}
         onClick={(e) => { if (e.target === e.currentTarget) setAddAt(null) }}
+        onPointerDown={empty ? undefined : onPanDown} onPointerMove={onPanMove} onPointerUp={onPanUp} onPointerCancel={onPanUp}
       >
         {!anyBound ? (
           <div className="canvas-empty">
@@ -611,7 +651,7 @@ export default function Studio() {
           <FlowCanvas recipe={recipe} bindings={bindings} byId={byId} preview={preview} sel={sel} setSel={setSel}
             addAt={addAt} setAddAt={setAddAt} onAdd={(op, a) => addStep(op, a.i, a.branch)}
             expanded={expanded} onToggleGroup={toggleGroup} range={range} onStepClick={clickStep} onConnect={(role) => setAddData({ role })} onAddData={() => setAddData({})}
-            zoom={zoom} />
+            zoom={zoom} pan={pan} />
         )}
         {dropping && <div className="canvas-drop-overlay">Drop to add this file to the workflow</div>}
       </div>
@@ -846,13 +886,13 @@ function MacroBanner({ info, onAddData }: { info: MacroInfo; onAddData: () => vo
 // ======================================================================== flow canvas
 
 function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAddAt, onAdd, onConnect, onAddData,
-  expanded, onToggleGroup, range, onStepClick, zoom }: {
+  expanded, onToggleGroup, range, onStepClick, zoom, pan }: {
   recipe: Recipe; bindings: Record<string, string>; byId: Record<string, Selection>; preview: Preview | null
   sel: Sel; setSel: (s: Sel) => void; addAt: AddAt; setAddAt: (a: AddAt) => void
   onAdd: (op: string, at: NonNullable<AddAt>) => void; onConnect: (role: string) => void; onAddData: () => void
   expanded: Set<string>; onToggleGroup: (id: string, open?: boolean) => void
   range: { start: number; end: number } | null; onStepClick: (i: number, branch: string | undefined, shift: boolean) => void
-  zoom: number
+  zoom: number; pan: { x: number; y: number }
 }) {
   const n = recipe.steps.length
   const pos = (col: number, lane: number) => ({ x: PAD_X + col * COL_W, y: PAD_Y + lane * LANE_H })
@@ -991,7 +1031,7 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
 
   return (
     // The flow is laid out at 100% and scaled; the outer box reserves the scaled size so scrolling stays right.
-    <div className="flow-zoom" style={{ width: width * zoom, height: height * zoom }}>
+    <div className="flow-zoom" style={{ width: width * zoom, height: height * zoom, transform: `translate(${pan.x}px, ${pan.y}px)` }}>
     <div className="flow" style={{ width, height, transform: `scale(${zoom})` }}>
       <svg className="flow-edges" width={width} height={height}>{edges}</svg>
       {groups.filter((g) => expanded.has(g.id) && colOf[g.start] !== undefined).map(groupBox)}

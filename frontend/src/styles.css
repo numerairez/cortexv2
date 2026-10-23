@@ -257,6 +257,9 @@ pre.prompt { white-space: pre-wrap; word-break: break-word; font-family: var(--m
   background-color: var(--surface-2);
   background-image: radial-gradient(var(--line-strong) 1px, transparent 1px); background-size: 18px 18px;
 }
+.prep-canvas:not(.empty) { cursor: grab; }
+.prep-canvas.panning { cursor: grabbing; user-select: none; }
+.prep-canvas.panning .flow-add { opacity: 0; }
 .flow { position: relative; min-width: 100%; }
 .flow-edges { position: absolute; inset: 0; pointer-events: none; }
 .flow-edge { fill: none; stroke: var(--faint); stroke-width: 2; }
