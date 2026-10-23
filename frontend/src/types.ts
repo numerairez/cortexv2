@@ -26,6 +26,8 @@ export interface Source {
   created_at: string
   updated_at: string
   selection_count?: number
+  /** A dropped file copied into the app folder, so not linked to the original path. */
+  is_copy?: boolean
   /** Distinct sheets with at least one saved selection (list endpoint only). */
   sheets_used?: number
   selections?: Selection[]

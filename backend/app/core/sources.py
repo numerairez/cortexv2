@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from ..config import get_paths
 from ..connectors import confluence, documents, tabular
 from ..storage import db
 
@@ -48,8 +49,19 @@ def validate_path(raw: str) -> Path:
     return p
 
 
+def _in_uploads(location: str) -> bool:
+    try:
+        return Path(location).resolve().is_relative_to((get_paths().root / "uploads").resolve())
+    except (OSError, ValueError):
+        return False
+
+
 def _decode(row):
-    return db.decode(row, "metadata")
+    row = db.decode(row, "metadata")
+    if row:
+        # Dropped files are copied into the app folder; flag them as not linked to the original path.
+        row["is_copy"] = row["kind"] != "confluence" and _in_uploads(row["location"])
+    return row
 
 
 def get_source(source_id: str) -> dict:
@@ -175,14 +187,20 @@ def relocate_source(source_id: str, raw_path: str) -> dict:
     path = validate_path(raw_path)
     if _kind_for(path) != src["kind"]:
         raise SourceError(f"New file must be the same type ({src['kind']})")
+    if _in_uploads(str(path)):
+        raise SourceError("Choose the original file, not a copy inside Flowbook's folder")
+    other = db.query_one("SELECT name FROM sources WHERE location = ? AND id != ? AND deleted_at IS NULL", (str(path), source_id))
+    if other:
+        raise SourceError(f"That file is already in My data as “{other['name']}”")
     try:
         meta, fp = _inspect_file(path, src["kind"])
     except (tabular.TabularError, documents.DocumentError) as e:
         raise SourceError(str(e))
+    detail = "Re-linked to the original file" if src["is_copy"] else "Relocated to a new file"
     db.execute(
         "UPDATE sources SET location = ?, metadata = ?, fingerprint = ?, status = 'ok', status_detail = ?, updated_at = ? "
         "WHERE id = ?",
-        (str(path), db.dumps(meta), fp["sha256"], "Relocated to a new file", db.now(), source_id),
+        (str(path), db.dumps(meta), fp["sha256"], detail, db.now(), source_id),
     )
     return get_source(source_id)
 
@@ -325,3 +343,4 @@ def check_selection(selection_id: str) -> dict:
         if drift:
             result.update(status="drift", detail="Columns differ from when this selection was saved", drift=drift)
     return result
+

@@ -89,7 +89,13 @@ def test_macro_to_workflow_end_to_end(client, macro_book, files):
     assert up["source"]["kind"] == "excel"
     again = client.post("/api/uploads", content=macro_book.read_bytes(), headers={"X-Filename": "monthly%20report.xlsm"}).json()
     assert again["existing"] and again["source"]["id"] == up["source"]["id"]
+    assert up["source"]["is_copy"]  # dropped files are copies, flagged as not linked to the original
     prod = client.post("/api/sources", json={"path": str(files["products"])}).json()
+    assert not prod["is_copy"]
+    # Re-linking the copy to its real path; a file already in My data or another copy is refused.
+    assert client.post(f"/api/sources/{up['source']['id']}/relocate", json={"path": str(files["products"])}).status_code == 400
+    linked = client.post(f"/api/sources/{up['source']['id']}/relocate", json={"path": str(macro_book)}).json()
+    assert linked["location"] == str(macro_book) and not linked["is_copy"] and linked["status_detail"] == "Re-linked to the original file"
     s_sales = client.post("/api/selections", json={"source_id": up["source"]["id"], "label": "Sales", "sheet": "Sales", "header_row": 5}).json()
     s_prod = client.post("/api/selections", json={"source_id": prod["id"], "label": "Products", "sheet": "Products", "header_row": 1}).json()
 

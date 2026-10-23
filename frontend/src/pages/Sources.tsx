@@ -86,7 +86,7 @@ export default function Sources() {
   const [filter, setFilter] = useState('')
   const [params, setParams] = useSearchParams()
   const openId = params.get('open')
-  const open = (id: string | null) => setParams(id ? { open: id } : {})
+  const open = (id: string | null, relink?: boolean) => setParams(id ? { open: id, ...(relink && { relink: '1' }) } : {})
   const opened = data?.find((s) => s.id === openId)
   const [openTpl, setOpenTpl] = useState<DataTemplate | null>(null)
 
@@ -123,7 +123,7 @@ export default function Sources() {
       </div>
       {openId && (
         <Modal title={opened?.name ?? 'Source'} wide onClose={() => open(null)}>
-          <SourceDetailView key={openId} id={openId} onRemoved={() => { open(null); reload() }} onChanged={() => { reload(); templates.reload() }} />
+          <SourceDetailView key={openId} id={openId} startRelink={params.get('relink') === '1'} onRemoved={() => { open(null); reload() }} onChanged={() => { reload(); templates.reload() }} />
         </Modal>
       )}
       {openTpl && <TemplateModal template={openTpl} onClose={() => setOpenTpl(null)} onDeleted={() => { setOpenTpl(null); templates.reload() }} />}
@@ -134,7 +134,7 @@ export default function Sources() {
 
 function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdated }: {
   sources: Source[]; filter: string; setFilter: (f: string) => void; producedBy: Map<string, DataTemplate>
-  onOpen: (id: string) => void; onUpdated: (s: Source) => void
+  onOpen: (id: string, relink?: boolean) => void; onUpdated: (s: Source) => void
 }) {
   const toast = useToast()
   const canvasRef = useRef<HTMLDivElement>(null)
@@ -170,7 +170,7 @@ function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdate
   const target = drag && cellAt(PAD + layout[drag.id].c * CELL_W + drag.dx, PAD + layout[drag.id].r * CELL_H + drag.dy)
 
   const startDrag = (e: React.PointerEvent, id: string) => {
-    if (e.button !== 0 || (e.target as Element).closest('.file-tile-refresh')) return
+    if (e.button !== 0 || (e.target as Element).closest('.file-tile-refresh, .file-tile-copy')) return
     const x0 = e.clientX, y0 = e.clientY
     let moved = false, last = { dx: 0, dy: 0 }
     const move = (ev: PointerEvent) => {
@@ -268,6 +268,12 @@ function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdate
                     ? <SheetsUsed used={s.sheets_used ?? 0} total={s.metadata.sheets.length} selections={s.selection_count ?? 0} />
                     : <span className="faint small">{fileTypeFor(s.kind, s.metadata.extension)}</span>}
                 </button>
+                {s.is_copy && (
+                  <button className="file-tile-copy" onClick={() => onOpen(s.id, true)}
+                    title="Not linked to the original file: this is a copy kept in Flowbook because it was dropped in, so edits to the original won’t show up. Click to re-link it to the real path.">
+                    copy · re-link
+                  </button>
+                )}
                 <span className="file-tile-time" title={`${s.kind === 'confluence' ? 'Page edited' : 'File modified'}: ${modified ? fmtDate(modified.toISOString()) : 'unknown'}\nLast checked: ${fmtDate(s.updated_at)}`}>
                   {modified ? fmtShort(modified) : '—'}
                 </span>

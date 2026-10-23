@@ -19,11 +19,11 @@ export default function SourceDetail() {
 }
 
 /** A source's details, selections and sheet configurator; used by its own page and the My data pop-up. */
-export function SourceDetailView({ id, onRemoved, onChanged }: { id: string; onRemoved: () => void; onChanged?: () => void }) {
+export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id: string; onRemoved: () => void; onChanged?: () => void; startRelink?: boolean }) {
   const toast = useToast()
   const { data: src, error, reload, setData } = useLoad(() => api.get<Source>(`/api/sources/${id}`), [id])
   const [busy, setBusy] = useState(false)
-  const [relocating, setRelocating] = useState(false)
+  const [relocating, setRelocating] = useState(!!startRelink)
   const [editing, setEditing] = useState<Selection | null>(null)
 
   if (error) return <ErrorBox error={error} />
@@ -58,11 +58,19 @@ export function SourceDetailView({ id, onRemoved, onChanged }: { id: string; onR
         </div>
         <div className="row">
           <button onClick={refresh} disabled={busy}>{busy ? <Spinner /> : '↻'} Check for changes</button>
-          {src.kind !== 'confluence' && <button onClick={() => setRelocating(true)}>Point to a new file…</button>}
+          {src.kind !== 'confluence' && <button onClick={() => setRelocating(true)}>{src.is_copy ? 'Re-link to original…' : 'Point to a new file…'}</button>}
           <button className="danger" onClick={remove}>Remove</button>
         </div>
       </div>
 
+      {src.is_copy && (
+        <div className="alert warn small row" style={{ marginBottom: 12, flexWrap: 'nowrap' }}>
+          <span style={{ flex: 1 }}>
+            <b>Not linked to the original file.</b> This is a copy kept in Flowbook because it was dropped in, so edits to the original won’t show up. Point it at the real path to stay in sync; selections are kept.
+          </span>
+          <button className="sm primary" onClick={() => setRelocating(true)}>Re-link to original…</button>
+        </div>
+      )}
       <div className="card">
         <dl className="kv">
           <dt>Status</dt><dd><StatusBadge status={src.status} /> {src.status_detail && <span className="muted small">{src.status_detail}</span>}</dd>
@@ -322,27 +330,37 @@ function SheetConfigurator({ source, editing, onSaved, onCancelEdit }: {
 }
 
 function RelocateModal({ source, onClose, onDone }: { source: Source; onClose: () => void; onDone: (s: Source) => void }) {
+  const relink = !!source.is_copy
   const [path, setPath] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const toast = useToast()
+  const copyName = source.location.split(/[\\/]/).pop() ?? source.name
+  const picked = path.trim().replace(/^"|"$/g, '').split(/[\\/]/).pop() ?? ''
   const submit = async () => {
     setBusy(true); setError(null)
     try {
       const s = await api.post<Source>(`/api/sources/${source.id}/relocate`, { path })
-      toast('Source now points to the new file. Check saved selections for column changes.')
+      toast(relink ? 'Linked to the original file. Changes to it will now show up here.' : 'Source now points to the new file. Check saved selections for column changes.')
       onDone(s)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   return (
-    <Modal title="Point to a new file" onClose={onClose} wide footer={<>
+    <Modal title={relink ? 'Re-link to the original file' : 'Point to a new file'} onClose={onClose} wide footer={<>
       <button onClick={onClose}>Cancel</button>
-      <button className="primary" disabled={!path || busy} onClick={submit}>Use this file</button>
+      <button className="primary" disabled={!path || busy} onClick={submit}>{relink ? 'Link this file' : 'Use this file'}</button>
     </>}>
-      <p className="muted">Use this for recurring files, e.g. next month’s workbook. Selections, collections, and recipes keep working if the columns still match.</p>
+      {relink
+        ? <p className="muted">Flowbook is reading a copy of <b>{copyName}</b> that was dropped in. Find the real file on your PC or shared drive so Flowbook reads it from there and sees future edits. Selections, collections and workflows keep working if the columns still match.</p>
+        : <p className="muted">Use this for recurring files, e.g. next month’s workbook. Selections, collections, and recipes keep working if the columns still match.</p>}
       <ErrorBox error={error} />
       <div className="stack">
-        <Field label="New file path"><input value={path} onChange={(e) => setPath(e.target.value)} /></Field>
+        <Field label={relink ? 'Original file path' : 'New file path'} help={relink ? 'Paste a full path (Shift + right-click the file in Explorer → “Copy as path”), or browse below.' : undefined}>
+          <input value={path} onChange={(e) => setPath(e.target.value)} placeholder={relink ? `e.g. S:\\Finance\\${copyName}` : undefined} autoFocus={relink} />
+        </Field>
+        {relink && picked && picked.toLowerCase() !== copyName.toLowerCase() && (
+          <div className="alert warn small">The chosen file is called <b>{picked}</b>, not <b>{copyName}</b>. That’s fine if it was renamed; just make sure it’s the same data.</div>
+        )}
         <FileBrowser onPick={setPath} selected={[path]} />
       </div>
     </Modal>
