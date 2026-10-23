@@ -4,7 +4,7 @@ import { TemplateOffer, suggestTemplate } from '../components/Templates'
 import { api, qs } from '../api'
 import { DataTable, fmt } from '../components/DataTable'
 import { FileBrowser } from '../components/FileBrowser'
-import { ErrorBox, Field, KindIcon, Loading, Modal, Spinner, StatusBadge, fmtBytes, fmtDate, useLoad, useToast } from '../components/ui'
+import { ErrorBox, Field, KindIcon, Loading, Modal, Spinner, StatusBadge, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
 import type { Selection, SelectionCheck, SheetPreview, SheetProfile, Source } from '../types'
 
 export default function SourceDetail() {
@@ -71,6 +71,8 @@ export function SourceDetailView({ id, onRemoved, onChanged }: { id: string; onR
           {src.metadata.segments !== undefined && <><dt>Passages</dt><dd>{src.metadata.segments} ({src.metadata.characters?.toLocaleString()} characters)</dd></>}
           {src.metadata.version !== undefined && <><dt>Page version</dt><dd>{src.metadata.version} {src.metadata.space && `· space ${src.metadata.space}`}</dd></>}
           <dt>Fingerprint</dt><dd className="mono small">{src.fingerprint?.slice(0, 24)}</dd>
+          {sourceModified(src) && <><dt>{src.kind === 'confluence' ? 'Page edited' : 'File modified'}</dt><dd>{fmtDate(sourceModified(src)!.toISOString())}</dd></>}
+          <dt>Last checked</dt><dd>{fmtDate(src.updated_at)}</dd>
           <dt>Added</dt><dd>{fmtDate(src.created_at)}</dd>
         </dl>
       </div>

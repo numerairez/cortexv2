@@ -17,6 +17,8 @@ export interface Source {
     space?: string
     version?: number
     url?: string
+    /** Confluence: when the page was last edited (ISO). Files use mtime. */
+    modified?: string
   }
   fingerprint: string | null
   status: SourceStatus
@@ -24,6 +26,8 @@ export interface Source {
   created_at: string
   updated_at: string
   selection_count?: number
+  /** Distinct sheets with at least one saved selection (list endpoint only). */
+  sheets_used?: number
   selections?: Selection[]
 }
 

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { SourceKind } from '../types'
+import type { Source, SourceKind } from '../types'
 import { FileIcon } from './Icons'
 
 // ---------- toasts
@@ -157,6 +157,12 @@ export function CopyButton({ text, label = 'Copy', primary }: { text: string; la
     setTimeout(() => setCopied(false), 2000)
   }
   return <button className={primary ? 'primary' : ''} onClick={copy}>{copied ? '✓ Copied' : label}</button>
+}
+
+/** When the underlying file (mtime) or Confluence page was last modified, as recorded at the last check. */
+export function sourceModified(s: Source): Date | null {
+  if (s.metadata.mtime) return new Date(s.metadata.mtime * 1000)
+  return s.metadata.modified ? new Date(s.metadata.modified) : null
 }
 
 export function fmtDate(iso: string | null | undefined) {

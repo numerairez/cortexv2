@@ -61,10 +61,13 @@ def get_source(source_id: str) -> dict:
 
 def list_sources() -> list[dict]:
     rows = [_decode(r) for r in db.query("SELECT * FROM sources WHERE deleted_at IS NULL ORDER BY created_at DESC")]
-    counts = {r["source_id"]: r["n"] for r in db.query(
-        "SELECT source_id, COUNT(*) n FROM selections WHERE deleted_at IS NULL GROUP BY source_id")}
+    counts = {r["source_id"]: r for r in db.query(
+        "SELECT source_id, COUNT(*) n, COUNT(DISTINCT CASE WHEN kind = 'sheet' THEN json_extract(config, '$.sheet') END) sheets "
+        "FROM selections WHERE deleted_at IS NULL GROUP BY source_id")}
     for r in rows:
-        r["selection_count"] = counts.get(r["id"], 0)
+        c = counts.get(r["id"])
+        r["selection_count"] = c["n"] if c else 0
+        r["sheets_used"] = c["sheets"] if c else 0
     return rows
 
 
@@ -120,7 +123,7 @@ def add_confluence_source(page_ref: str, base_url: str) -> dict:
     sid = db.new_id("src")
     ts = db.now()
     meta = {"title": page["title"], "space": page["space"], "version": page["version"], "url": page["url"],
-            "base_url": base_url}
+            "base_url": base_url, "modified": page.get("modified")}
     db.execute(
         "INSERT INTO sources (id, kind, name, location, metadata, fingerprint, status, created_at, updated_at) "
         "VALUES (?, 'confluence', ?, ?, ?, ?, 'ok', ?, ?)",
@@ -141,7 +144,7 @@ def refresh_source(source_id: str) -> dict:
             if new_fp != src["fingerprint"]:
                 status, detail = "changed", f"Page updated to version {page['version']}"
             fp_value = new_fp
-            meta.update(title=page["title"], version=page["version"])
+            meta.update(title=page["title"], version=page["version"], modified=page.get("modified"))
         except confluence.ConfluenceError as e:
             status, detail = "error", str(e)
     else:

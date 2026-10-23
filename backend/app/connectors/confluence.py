@@ -79,6 +79,7 @@ def fetch_page(base_url: str, page_id: str) -> dict:
         "id": str(data.get("id", page_id)),
         "title": data.get("title", f"Page {page_id}"),
         "version": (data.get("version") or {}).get("number"),
+        "modified": (data.get("version") or {}).get("when"),
         "space": (data.get("space") or {}).get("key"),
         "html": ((data.get("body") or {}).get("storage") or {}).get("value", ""),
         "url": base_url.rstrip("/") + ((data.get("_links") or {}).get("webui") or f"/pages/viewpage.action?pageId={page_id}"),
