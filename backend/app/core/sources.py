@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from ..config import get_paths
-from ..connectors import confluence, documents, tabular
+from ..connectors import confluence, documents, feeds, tabular
 from ..storage import db
 
 MAX_FILE_BYTES = 250 * 1024 * 1024
@@ -86,7 +86,7 @@ def list_sources() -> list[dict]:
 def _inspect_file(path: Path, kind: str) -> tuple[dict, dict]:
     fp = documents.fingerprint_file(path)
     meta: dict[str, Any] = {"extension": path.suffix.lower(), "size": fp["size"], "mtime": fp["mtime"]}
-    if kind in ("excel", "csv"):
+    if kind in ("excel", "csv", "feed"):
         meta["sheets"] = tabular.list_sheets(path)
     else:
         segs = documents.extract_segments(path)
@@ -145,6 +145,45 @@ def add_confluence_source(page_ref: str, base_url: str) -> dict:
     return get_source(sid)
 
 
+def _fetch_feed(path: Path, feed_id: str, params: dict) -> tuple[dict, dict]:
+    """Run the feed's fetch code and save its table as a CSV snapshot at ``path``.
+
+    The snapshot is what the rest of the app reads, so a feed behaves like a CSV source.
+    On failure the previous snapshot (if any) is left untouched.
+    """
+    try:
+        feed = feeds.get(feed_id)
+        df = feed.module.fetch(params)
+    except feeds.FeedError as e:
+        raise SourceError(str(e))
+    except Exception as e:  # external code: report it, never crash the request
+        raise SourceError(f"{feed.name} failed: {e.__class__.__name__}: {e}")
+    if not hasattr(df, "to_csv"):
+        raise SourceError(f"{feed.name} did not return a table")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    df.to_csv(tmp, index=False)
+    tmp.replace(path)
+    meta, fp = _inspect_file(path, "feed")
+    meta.update(feed=feed_id, feed_name=feed.name, params=params, rows=int(df.shape[0]), fetched_at=db.now())
+    return meta, fp
+
+
+def add_feed_source(feed_id: str, name: str | None, params: dict) -> dict:
+    sid = db.new_id("src")
+    path = get_paths().root / "feeds" / f"{sid}.csv"
+    meta, fp = _fetch_feed(path, feed_id, params)
+    label = (name or "").strip() or meta["feed_name"]
+    ts = db.now()
+    db.execute(
+        "INSERT INTO sources (id, kind, name, location, metadata, fingerprint, status, created_at, updated_at) "
+        "VALUES (?, 'feed', ?, ?, ?, ?, 'ok', ?, ?)",
+        (sid, label, str(path), db.dumps(meta), fp["sha256"], ts, ts),
+    )
+    create_selection(sid, kind="sheet", label=label, config={"sheet": tabular.CSV_SHEET, "header_row": 1})
+    return get_source(sid)
+
+
 def refresh_source(source_id: str) -> dict:
     """Re-inspect a source and record whether it is ok, changed, missing, or unreadable."""
     src = get_source(source_id)
@@ -158,6 +197,16 @@ def refresh_source(source_id: str) -> dict:
             fp_value = new_fp
             meta.update(title=page["title"], version=page["version"], modified=page.get("modified"))
         except confluence.ConfluenceError as e:
+            status, detail = "error", str(e)
+    elif src["kind"] == "feed":
+        # Refreshing a feed re-runs its fetch code; the new snapshot replaces the old one.
+        try:
+            new_meta, fp = _fetch_feed(Path(src["location"]), meta.get("feed", ""), meta.get("params") or {})
+            if fp["sha256"] != src["fingerprint"]:
+                status, detail = "changed", "New data fetched"
+            fp_value = fp["sha256"]
+            meta.update(new_meta)
+        except SourceError as e:
             status, detail = "error", str(e)
     else:
         path = Path(src["location"])
@@ -182,8 +231,8 @@ def refresh_source(source_id: str) -> dict:
 def relocate_source(source_id: str, raw_path: str) -> dict:
     """Point an existing source at a new file (e.g. next month's workbook)."""
     src = get_source(source_id)
-    if src["kind"] == "confluence":
-        raise SourceError("Confluence sources cannot be relocated")
+    if src["kind"] in ("confluence", "feed"):
+        raise SourceError(f"{'Confluence' if src['kind'] == 'confluence' else 'Data feed'} sources cannot be relocated")
     path = validate_path(raw_path)
     if _kind_for(path) != src["kind"]:
         raise SourceError(f"New file must be the same type ({src['kind']})")
@@ -215,7 +264,7 @@ def delete_source(source_id: str) -> None:
 
 def preview_sheet(source_id: str, sheet: str, rows: int = 30) -> dict:
     src = get_source(source_id)
-    if src["kind"] not in ("excel", "csv"):
+    if src["kind"] not in ("excel", "csv", "feed"):
         raise SourceError("Only spreadsheet sources have sheets")
     try:
         return tabular.preview_rows(Path(src["location"]), sheet, rows)
@@ -279,7 +328,7 @@ def create_selection(source_id: str, kind: str, label: str, config: dict) -> dic
     src = get_source(source_id)
     schema = None
     if kind == "sheet":
-        if src["kind"] not in ("excel", "csv"):
+        if src["kind"] not in ("excel", "csv", "feed"):
             raise SourceError("Sheet selections need a spreadsheet source")
         if not config.get("sheet"):
             raise SourceError("Choose a sheet")

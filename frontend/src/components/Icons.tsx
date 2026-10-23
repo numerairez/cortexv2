@@ -3,15 +3,16 @@ import type { SourceKind } from '../types'
 
 // ---------- file-type icons (document with folded corner + type mark)
 
-type FileType = 'excel' | 'csv' | 'pdf' | 'word' | 'text' | 'markdown' | 'confluence' | 'web' | 'json' | 'code'
+type FileType = 'excel' | 'csv' | 'pdf' | 'word' | 'text' | 'markdown' | 'confluence' | 'web' | 'json' | 'code' | 'feed'
 
 const FILE_COLORS: Record<FileType, string> = {
-  excel: '#1f7a45', csv: '#3b8f6e', pdf: '#c8352b', word: '#2b5cb8', text: '#6b7586', markdown: '#4a5568', confluence: '#2f6fd6', web: '#6a4fc4', json: '#5b6475', code: '#3572a5',
+  excel: '#1f7a45', csv: '#3b8f6e', pdf: '#c8352b', word: '#2b5cb8', text: '#6b7586', markdown: '#4a5568', confluence: '#2f6fd6', web: '#6a4fc4', json: '#5b6475', code: '#3572a5', feed: '#b8612a',
 }
 
 export function fileTypeFor(kind: SourceKind | string | undefined, ext?: string): FileType {
   const e = (ext ?? '').toLowerCase()
   if (kind === 'confluence') return 'confluence'
+  if (kind === 'feed') return 'feed'
   if (kind === 'html' || e === '.html') return 'web'
   if (kind === 'json' || e === '.json') return 'json'
   if (kind === 'code' || e === '.py' || e === '.ipynb') return 'code'
@@ -52,6 +53,9 @@ function mark(type: FileType): ReactNode {
       return <path d="M11 15.5l-3 3.3 3 3.3M17 15.5l3 3.3-3 3.3M15 14.5l-2 8.6" fill="none" stroke={w} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
     case 'code':
       return <path d="M11 15.5l-3 3.3 3 3.3M17 15.5l3 3.3-3 3.3" fill="none" stroke={w} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+    case 'feed':
+      // arrow into a tray: data fetched in
+      return <path d="M14 13.5v7M10.8 17.5l3.2 3.2 3.2-3.2M8.5 21.5v2.5h11v-2.5" fill="none" stroke={w} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     case 'json':
       return <text x="14" y="22.6" textAnchor="middle" fontSize="8" fontWeight="800" fill={w} fontFamily="ui-monospace, monospace">{'{ }'}</text>
     default:

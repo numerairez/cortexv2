@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { api, qs, uploadFile } from '../api'
 import { useDatasets } from '../datasets'
-import type { Selection, SheetPreview, SheetProfile, Source, TemplateSuggestion } from '../types'
+import type { FeedInfo, Selection, SheetPreview, SheetProfile, Source, TemplateSuggestion } from '../types'
 import { fmt } from './DataTable'
 import { FileBrowser } from './FileBrowser'
 import { FileIcon } from './Icons'
 import { TemplateOffer, suggestTemplate } from './Templates'
-import { ErrorBox, Loading, Modal, Spinner, useToast } from './ui'
+import { ErrorBox, Loading, Modal, Spinner, useLoad, useToast } from './ui'
 
 export interface UploadResult { path: string; source: Source | null; existing: boolean }
 
@@ -30,6 +30,33 @@ export function DropZone({ onFiles, children, className = '', accept }: {
     >
       <input ref={input} type="file" hidden accept={accept} multiple onChange={(e) => { if (e.target.files?.length) onFiles([...e.target.files]); e.target.value = '' }} />
       {children}
+    </div>
+  )
+}
+
+/** The data feeds set up on this PC (backend/app/connectors/feeds/). */
+export const useFeeds = () => useLoad(() => api.get<FeedInfo[]>('/api/feeds'), []).data
+
+/** One row per data feed; a feed that failed to load is shown with its error and cannot be picked. */
+export function FeedList({ feeds, selected, busy, onPick }: {
+  feeds: FeedInfo[]; selected?: string | null; busy?: string | null; onPick: (f: FeedInfo) => void
+}) {
+  return (
+    <div className="card flush" style={{ maxHeight: 320, overflow: 'auto' }}>
+      {feeds.map((f) => (
+        <div key={f.id} className={`list-item${f.error ? '' : ' clickable-row'}`} aria-disabled={!!f.error}
+          style={f.id === selected ? { background: 'var(--accent-soft)' } : f.error ? { opacity: 0.6 } : undefined}
+          onClick={() => { if (!f.error && !busy) onPick(f) }}>
+          <FileIcon kind="feed" size={26} />
+          <div className="grow">
+            <div className="ellipsis" style={{ fontWeight: 600 }}>{f.name}</div>
+            <div className={`small ellipsis ${f.error ? '' : 'faint'}`} style={f.error ? { color: 'var(--bad)' } : undefined} title={f.error ?? f.description}>
+              {f.error ?? f.description}
+            </div>
+          </div>
+          {busy === f.id && <Spinner />}
+        </div>
+      ))}
     </div>
   )
 }
@@ -132,7 +159,7 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
   onClose: () => void; onPick: (s: Selection) => void; title?: string; hint?: string
   presetSource?: Source; presetSheet?: string; exclude?: string[]
 }) {
-  const [tab, setTab] = useState<'mine' | 'file'>(presetSource || hint ? 'file' : 'mine')
+  const [tab, setTab] = useState<'mine' | 'file' | 'feed'>(presetSource || hint ? 'file' : 'mine')
   const { datasets: selections } = useDatasets()
   const [source, setSource] = useState<Source | null>(presetSource ?? null)
   const [offer, setOffer] = useState<{ sel: Selection; suggestion: TemplateSuggestion & { folder: string; formats: string[] } } | null>(null)
@@ -142,13 +169,15 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
+  const feeds = useFeeds()
+  const [fetching, setFetching] = useState<string | null>(null)
 
   const mine = useMemo(() => (selections ?? []).filter((s) => !exclude.includes(s.id))
     .filter((s) => !filter || `${s.label} ${s.source_name}`.toLowerCase().includes(filter.toLowerCase())), [selections, filter, exclude])
 
   // After a sheet is set up: if its file is one of a dated series, offer to make a data template.
   const sheetReady = async (sel: Selection) => {
-    if (!source) { onPick(sel); return }
+    if (!source || source.kind === 'feed') { onPick(sel); return }
     setChecking(true)
     const suggestion = await suggestTemplate(source.location)
     setChecking(false)
@@ -168,6 +197,12 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
       if (r.existing) toast('You already added this file; reusing it')
       gotSource(r.source)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
+  }
+  const addFeed = async (f: FeedInfo) => {
+    setFetching(f.id); setError(null)
+    try {
+      gotSource(await api.post<Source>('/api/sources/feed', { feed: f.id }))
+    } catch (e) { setError((e as Error).message) } finally { setFetching(null) }
   }
   const addPath = async (p: string) => {
     setBusy(true); setError(null)
@@ -197,6 +232,7 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
           <div className="tabs">
             <button className={tab === 'mine' ? 'active' : ''} onClick={() => setTab('mine')}>Data you already added</button>
             <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>Add a file</button>
+            {feeds && feeds.length > 0 && <button className={tab === 'feed' ? 'active' : ''} onClick={() => setTab('feed')}>Data feeds</button>}
           </div>
           <ErrorBox error={error} />
           {tab === 'mine' ? (
@@ -224,6 +260,11 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
                   ))}
                 </div>
               )}
+            </div>
+          ) : tab === 'feed' ? (
+            <div className="stack">
+              <p className="muted small" style={{ margin: 0 }}>Click a feed to fetch its latest table. A snapshot is kept in your Flowbook folder; check the source for changes to fetch it again.</p>
+              <FeedList feeds={feeds ?? []} busy={fetching} onPick={addFeed} />
             </div>
           ) : (
             <div className="stack">

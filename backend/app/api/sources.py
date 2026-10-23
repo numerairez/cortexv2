@@ -12,7 +12,7 @@ from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from ..config import get_paths
-from ..connectors import pycode, vba
+from ..connectors import feeds, pycode, vba
 from ..core import collections, context, runs, sources, templates
 from ..services import prompting
 from ..storage import db
@@ -27,6 +27,12 @@ class AddFile(BaseModel):
 
 class AddConfluence(BaseModel):
     page: str
+
+
+class AddFeed(BaseModel):
+    feed: str
+    name: str | None = None
+    params: dict = {}
 
 
 class PathBody(BaseModel):
@@ -88,6 +94,16 @@ def add_source(body: AddFile):
 @router.post("/sources/confluence")
 def add_confluence(body: AddConfluence):
     return sources.add_confluence_source(body.page, db.get_setting("confluence_base_url", ""))
+
+
+@router.get("/feeds")
+def list_feeds():
+    return [f.info() for f in feeds.available()]
+
+
+@router.post("/sources/feed")
+def add_feed(body: AddFeed):
+    return sources.add_feed_source(body.feed, body.name, body.params)
 
 
 @router.get("/sources/{source_id}")

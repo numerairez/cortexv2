@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
 import { FileBrowser } from '../components/FileBrowser'
+import { FeedList, useFeeds } from '../components/AddData'
 import { Empty, ErrorBox, Field, Loading, Modal, Spinner, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
 import type { DataTemplate, Source } from '../types'
 import { FileIcon, fileTypeFor } from '../components/Icons'
@@ -274,7 +275,7 @@ function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdate
                     copy · re-link
                   </button>
                 )}
-                <span className="file-tile-time" title={`${s.kind === 'confluence' ? 'Page edited' : 'File modified'}: ${modified ? fmtDate(modified.toISOString()) : 'unknown'}\nLast checked: ${fmtDate(s.updated_at)}`}>
+                <span className="file-tile-time" title={`${s.kind === 'confluence' ? 'Page edited' : s.kind === 'feed' ? 'Last fetched' : 'File modified'}: ${modified ? fmtDate(modified.toISOString()) : 'unknown'}\nLast checked: ${fmtDate(s.updated_at)}`}>
                   {modified ? fmtShort(modified) : '—'}
                 </span>
                 <button className={`ghost icon file-tile-refresh${checking.has(s.id) ? ' busy' : ''}`} onClick={() => check(s)} disabled={checking.has(s.id)} aria-label={`Check ${s.name} for changes`} title="Check for changes">
@@ -290,9 +291,13 @@ function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdate
 }
 
 function AddSourceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (s: Source) => void }) {
-  const [tab, setTab] = useState<'file' | 'confluence'>('file')
+  const [tab, setTab] = useState<'file' | 'confluence' | 'feed'>('file')
   const [path, setPath] = useState('')
   const [page, setPage] = useState('')
+  const [feedName, setFeedName] = useState('')
+  const feeds = useFeeds()
+  const [feedId, setFeedId] = useState<string | null>(null)
+  const feed = feeds?.find((f) => f.id === feedId)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const toast = useToast()
@@ -302,7 +307,9 @@ function AddSourceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (s
     try {
       const s = tab === 'file'
         ? await api.post<Source>('/api/sources', { path })
-        : await api.post<Source>('/api/sources/confluence', { page })
+        : tab === 'feed'
+          ? await api.post<Source>('/api/sources/feed', { feed: feedId, name: feedName })
+          : await api.post<Source>('/api/sources/confluence', { page })
       toast(`Added ${s.name}`)
       onAdded(s)
     } catch (e) {
@@ -315,13 +322,14 @@ function AddSourceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (s
   return (
     <Modal title="Add a source" onClose={onClose} wide footer={<>
       <button onClick={onClose}>Cancel</button>
-      <button className="primary" disabled={busy || (tab === 'file' ? !path.trim() : !page.trim())} onClick={submit}>
-        {busy ? 'Adding…' : 'Add source'}
+      <button className="primary" disabled={busy || (tab === 'file' ? !path.trim() : tab === 'confluence' ? !page.trim() : !feed)} onClick={submit}>
+        {busy ? (tab === 'feed' ? 'Fetching…' : 'Adding…') : 'Add source'}
       </button>
     </>}>
       <div className="tabs">
         <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>File on this PC / network drive</button>
         <button className={tab === 'confluence' ? 'active' : ''} onClick={() => setTab('confluence')}>Confluence page</button>
+        {feeds && feeds.length > 0 && <button className={tab === 'feed' ? 'active' : ''} onClick={() => setTab('feed')}>Data feeds</button>}
       </div>
       <ErrorBox error={error} />
       {tab === 'file' ? (
@@ -331,6 +339,13 @@ function AddSourceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (s
           </Field>
           <FileBrowser onPick={setPath} selected={[path]} />
           <p className="faint small">Supported: .xlsx, .xlsm, .csv, .tsv, .pdf, .docx, .txt, .md. Password-protected files and legacy .xls are not supported.</p>
+        </div>
+      ) : tab === 'feed' ? (
+        <div className="stack">
+          <FeedList feeds={feeds ?? []} selected={feedId} onPick={(f) => setFeedId(f.id)} />
+          <Field label="Name (optional)" help="The table is fetched now and saved in your Flowbook folder. Use “Check for changes” to fetch it again.">
+            <input value={feedName} onChange={(e) => setFeedName(e.target.value)} placeholder={feed?.name ?? 'Choose a feed above'} />
+          </Field>
         </div>
       ) : (
         <div className="stack">

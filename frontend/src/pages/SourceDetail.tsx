@@ -58,7 +58,7 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
         </div>
         <div className="row">
           <button onClick={refresh} disabled={busy}>{busy ? <Spinner /> : '↻'} Check for changes</button>
-          {src.kind !== 'confluence' && <button onClick={() => setRelocating(true)}>{src.is_copy ? 'Re-link to original…' : 'Point to a new file…'}</button>}
+          {src.kind !== 'confluence' && src.kind !== 'feed' && <button onClick={() => setRelocating(true)}>{src.is_copy ? 'Re-link to original…' : 'Point to a new file…'}</button>}
           <button className="danger" onClick={remove}>Remove</button>
         </div>
       </div>
@@ -79,7 +79,8 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
           {src.metadata.segments !== undefined && <><dt>Passages</dt><dd>{src.metadata.segments} ({src.metadata.characters?.toLocaleString()} characters)</dd></>}
           {src.metadata.version !== undefined && <><dt>Page version</dt><dd>{src.metadata.version} {src.metadata.space && `· space ${src.metadata.space}`}</dd></>}
           <dt>Fingerprint</dt><dd className="mono small">{src.fingerprint?.slice(0, 24)}</dd>
-          {sourceModified(src) && <><dt>{src.kind === 'confluence' ? 'Page edited' : 'File modified'}</dt><dd>{fmtDate(sourceModified(src)!.toISOString())}</dd></>}
+          {src.metadata.rows !== undefined && <><dt>Rows</dt><dd>{src.metadata.rows.toLocaleString()}</dd></>}
+          {sourceModified(src) && <><dt>{src.kind === 'confluence' ? 'Page edited' : src.kind === 'feed' ? 'Last fetched' : 'File modified'}</dt><dd>{fmtDate(sourceModified(src)!.toISOString())}</dd></>}
           <dt>Last checked</dt><dd>{fmtDate(src.updated_at)}</dd>
           <dt>Added</dt><dd>{fmtDate(src.created_at)}</dd>
         </dl>

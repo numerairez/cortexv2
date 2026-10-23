@@ -1,4 +1,7 @@
-export type SourceKind = 'excel' | 'csv' | 'document' | 'confluence'
+export type SourceKind = 'excel' | 'csv' | 'document' | 'confluence' | 'feed'
+/** A code-fetched data feed: one module in backend/app/connectors/feeds/. */
+export interface FeedInfo { id: string; name: string; description: string; error: string | null }
+
 export type SourceStatus = 'ok' | 'changed' | 'missing' | 'error'
 
 export interface Source {
@@ -19,6 +22,12 @@ export interface Source {
     url?: string
     /** Confluence: when the page was last edited (ISO). Files use mtime. */
     modified?: string
+    /** Data feed: which feed, what was passed to its fetch code, and the last fetch. */
+    feed?: string
+    feed_name?: string
+    params?: Record<string, unknown>
+    rows?: number
+    fetched_at?: string
   }
   fingerprint: string | null
   status: SourceStatus
