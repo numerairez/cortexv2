@@ -12,6 +12,7 @@ const SERVICE_NAMES: Record<string, string> = {
   transformation: 'Data Transformation Studio',
   transformation_ai: 'AI-drafted workflow',
   macro_to_workflow: 'Excel macro → workflow',
+  python_to_workflow: 'Python script → workflow',
 }
 
 export default function RunWorkspace() {
@@ -110,7 +111,7 @@ export default function RunWorkspace() {
       )}
 
       {run.status === 'completed' && run.service_id === 'knowledge_base' && <KnowledgeBaseResult run={run} />}
-      {run.status === 'completed' && (run.service_id === 'transformation_ai' || run.service_id === 'macro_to_workflow') && <RecipeDraftResult run={run} />}
+      {run.status === 'completed' && ['transformation_ai', 'macro_to_workflow', 'python_to_workflow'].includes(run.service_id) && <RecipeDraftResult run={run} />}
       {run.service_id === 'transformation' && <TransformationResult run={run} />}
 
       {run.status === 'completed' && isAI && (run.state.warnings?.length ?? 0) > 0 && (
@@ -183,6 +184,7 @@ function RecipeDraftResult({ run }: { run: Run }) {
   if (!recipe) return null
   const notTranslated = (run.state.not_translated as { macro_lines: string; what_it_does: string; why: string }[] | undefined) ?? []
   const missing = (run.state.missing_data as { reference: string; why_needed: string }[] | undefined) ?? []
+  const noun = run.service_id === 'python_to_workflow' ? 'script' : 'macro'
   return (
     <div className="card">
       <div className="card-head">
@@ -200,14 +202,14 @@ function RecipeDraftResult({ run }: { run: Run }) {
       </ol>
       {missing.length > 0 && (
         <div className="alert bad small" style={{ marginTop: 12 }}>
-          <b>The AI says the macro also needs data you haven’t connected:</b>
+          <b>The AI says the {noun} also needs data you haven’t connected:</b>
           <ul>{missing.map((m, i) => <li key={i}><b>{m.reference}</b> — {m.why_needed}</li>)}</ul>
-          Add it in the studio (Add data), or start the macro import again and connect it.
+          Add it in the studio (Add data), or start the {noun} import again and connect it.
         </div>
       )}
       {notTranslated.length > 0 && (
         <div className="alert warn small" style={{ marginTop: 12 }}>
-          <b>Parts of the macro that were not translated:</b>
+          <b>Parts of the {noun} that were not translated:</b>
           <ul>{notTranslated.map((m, i) => <li key={i}><span className="mono">{m.macro_lines}</span> — {m.what_it_does}{m.why ? ` (${m.why})` : ''}</li>)}</ul>
         </div>
       )}

@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api, uploadFile } from '../api'
 import { DropZone, type UploadResult } from '../components/AddData'
 import { FileIcon, OP_COLOR, OpIcon } from '../components/Icons'
+import { CodeBadge } from './MacroImport'
 import { OP_LABEL } from '../components/StepEditor'
 import { Empty, ErrorBox, Loading, Spinner, StatusBadge, fmtDate, useLoad, useToast } from '../components/ui'
 
@@ -23,6 +24,7 @@ export default function Workflows() {
   const startWithFiles = async (files: File[]) => {
     const f = files[0]
     if (/\.(xlsb|xls|bas|cls)$/i.test(f.name)) { nav('/workflows/from-macro', { state: { file: f } }); return }
+    if (/\.(py|ipynb)$/i.test(f.name)) { nav('/workflows/from-python', { state: { file: f } }); return }
     setBusy(true)
     try {
       const r = await uploadFile<UploadResult>(f)
@@ -57,12 +59,20 @@ export default function Workflows() {
             <Link className="btn primary" to="/workflows/new" onClick={(e) => e.stopPropagation()}>Start with a blank workflow</Link>
           </>}
         </DropZone>
-        <Link to="/workflows/from-macro" className="start-tile">
-          <div className="macro-badge"><FileIcon kind="excel" size={34} /><span>VBA</span></div>
-          <h2>Turn an Excel macro into a workflow</h2>
-          <p>We read the macro (never run it), find every file and sheet it uses, and your AI chatbot translates it into steps you can see and check.</p>
-          <span className="btn">Import a macro →</span>
-        </Link>
+        <div className="start-stack">
+          <Link to="/workflows/from-macro" className="start-tile">
+            <CodeBadge language="vba" size={34} />
+            <h2>Turn an Excel macro into a workflow</h2>
+            <p>We read the macro (never run it), find every file and sheet it uses, and your AI chatbot translates it into steps you can see and check.</p>
+            <span className="btn">Import a macro →</span>
+          </Link>
+          <Link to="/workflows/from-python" className="start-tile">
+            <CodeBadge language="python" size={34} />
+            <h2>Turn a Python script into a workflow</h2>
+            <p>Same for pandas scripts and notebooks: the code is read, never run, and translated into steps you can see and check.</p>
+            <span className="btn">Import a script →</span>
+          </Link>
+        </div>
       </div>
 
       <div className="row between" style={{ margin: '28px 0 12px' }}>

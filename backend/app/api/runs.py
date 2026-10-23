@@ -66,7 +66,7 @@ class AIPreviewBody(BaseModel):
 
 @router.get("/services")
 def list_services():
-    return [s.describe() for s in base.all_services() if s.id not in ("transformation_ai", "macro_to_workflow")]
+    return [s.describe() for s in base.all_services() if s.id not in ("transformation_ai", "macro_to_workflow", "python_to_workflow")]
 
 
 @router.get("/services/{service_id}")

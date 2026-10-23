@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { FileIcon, OP_COLOR, OpIcon } from '../components/Icons'
 import { CopyButton, Loading, useLoad } from '../components/ui'
+import { CodeBadge } from './MacroImport'
 
 interface Env {
   python: string; platform: string; app_version: string
@@ -20,6 +21,12 @@ const FEATURES = [
     title: 'Macros → workflows',
     text: 'Import an Excel macro. Flowbook reads it (never runs it), finds every file it uses, and your approved AI chatbot translates it into steps you can check.',
     to: '/workflows/from-macro', cta: 'Import a macro',
+  },
+  {
+    icon: <CodeBadge language="python" size={26} small />,
+    title: 'Python scripts → workflows',
+    text: 'Import a pandas script or notebook. Flowbook reads it (never runs it), finds every file it uses, and your approved AI chatbot translates it into steps you can check.',
+    to: '/workflows/from-python', cta: 'Import a script',
   },
   {
     icon: <span className="tpl-icon"><FileIcon kind="excel" size={26} /><span>📅</span></span>,

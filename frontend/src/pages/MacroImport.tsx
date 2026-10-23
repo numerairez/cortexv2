@@ -21,18 +21,40 @@ interface Analysis {
 }
 interface DepState { role: string; selectionId?: string; ignored: boolean }
 
-const KIND_TEXT: Record<Dep['kind'], { label: string; help: string }> = {
-  sheet: { label: 'Sheet in this workbook', help: 'The macro reads or writes this sheet.' },
-  external_file: { label: 'Another file', help: 'The macro opens this file by name.' },
-  dynamic_file: { label: 'File chosen in code', help: 'The file name is built while the macro runs. Pick the file it normally uses.' },
-  user_picks_file: { label: 'File the user picks', help: 'The macro asks the user to choose a file. Pick the one you normally choose.' },
-  folder: { label: 'Folder of files', help: 'The macro loops over files in a folder. Add a representative file, or combine them with Append.' },
+export type CodeLanguage = 'vba' | 'python'
+
+// Everything on this page that differs between an Excel macro and a Python script.
+const LANG = {
+  vba: {
+    noun: 'macro', Noun: 'Macro', badge: 'VBA', service: 'macro_to_workflow', accept: '.xlsm,.xlsb,.xls,.xltm,.xlam,.bas,.cls',
+    title: 'Turn an Excel macro into a workflow', fileTab: 'Macro workbook', drop: 'Drop the macro-enabled workbook here',
+    dropHint: '.xlsm, .xlsb, .xls — or an exported .bas module · click to choose', pathHint: 'S:\\Finance\\Monthly Report.xlsm',
+    pasteHelp: <>In Excel press <b>Alt+F11</b>, open the module, select all (Ctrl+A), copy, and paste it here. Useful when the workbook is protected or the macro lives in your Personal workbook.</>,
+    placeholder: 'Sub MonthlyReport()\n    ...\nEnd Sub', unit: 'module', entryLabel: 'Main macro (the one you run)', entryKind: 'sub',
+  },
+  python: {
+    noun: 'script', Noun: 'Script', badge: 'PY', service: 'python_to_workflow', accept: '.py,.ipynb',
+    title: 'Turn a Python script into a workflow', fileTab: 'Script or notebook', drop: 'Drop the Python script or notebook here',
+    dropHint: '.py or .ipynb · click to choose', pathHint: 'S:\\Finance\\monthly_report.py',
+    pasteHelp: <>Paste the Python code that prepares the data (pandas, openpyxl, csv…). Only the parts that read and reshape data become workflow steps.</>,
+    placeholder: 'import pandas as pd\n\ndf = pd.read_excel("sales.xlsx")\n...', unit: 'file', entryLabel: 'Main function (optional)', entryKind: 'function',
+  },
+} as const
+
+const kindText = (noun: string): Record<Dep['kind'], { label: string; help: string }> => ({
+  sheet: { label: 'Sheet in this workbook', help: `The ${noun} reads or writes this sheet.` },
+  external_file: { label: 'Another file', help: `The ${noun} opens this file by name.` },
+  dynamic_file: { label: 'File chosen in code', help: `The file name is built while the ${noun} runs. Pick the file it normally uses.` },
+  user_picks_file: { label: 'File the user picks', help: `The ${noun} asks the user to choose a file. Pick the one you normally choose.` },
+  folder: { label: 'Folder of files', help: `The ${noun} loops over files in a folder. Add a representative file, or combine them with Append.` },
   database: { label: 'Database', help: 'Databases can’t be read directly yet. Export the data to Excel/CSV and add that file.' },
   web: { label: 'Web address', help: 'Web data can’t be read directly. Save it as Excel/CSV and add that file.' },
-}
+})
 const depKey = (d: Dep) => `${d.kind}:${d.reference}`
 
-export default function MacroImport() {
+export default function MacroImport({ language = 'vba' }: { language?: CodeLanguage }) {
+  const L = LANG[language]
+  const KIND_TEXT = kindText(L.noun)
   const location = useLocation()
   const nav = useNavigate()
   const toast = useToast()
@@ -60,7 +82,7 @@ export default function MacroImport() {
   const analyse = async (body: { path?: string; code?: string; name?: string }, src: Source | null = null) => {
     setBusy(true); setError(null)
     try {
-      const a = await api.post<Analysis>('/api/macros/analyse', body)
+      const a = await api.post<Analysis>('/api/macros/analyse', { ...body, language })
       setAnalysis(a)
       let wb = src
       if (!wb && a.workbook.source_id) wb = await api.get<Source>(`/api/sources/${a.workbook.source_id}`)
@@ -68,7 +90,8 @@ export default function MacroImport() {
       setIncluded(Object.fromEntries(a.modules.map((m) => [m.name, true])))
       setViewing(a.modules[0]?.name ?? null)
       const subs = a.modules.flatMap((m) => m.procedures.filter((p) => p.kind === 'sub' && m.kind === 'standard'))
-      setEntry(subs[0]?.name ?? '')
+      // Python scripts often run top to bottom; only preselect a function called main.
+      setEntry(language === 'python' ? (a.modules.flatMap((m) => m.procedures).find((p) => p.name === 'main')?.name ?? '') : subs[0]?.name ?? '')
       setStep(2)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
@@ -102,7 +125,8 @@ export default function MacroImport() {
       }
       const role = prev?.role ?? roleFrom(d.kind === 'sheet' ? d.reference : d.filename ?? d.reference, taken)
       taken.push(role)
-      const ignoredByDefault = d.kind === 'sheet' && (d.created_by_macro || d.written_by_macro || d.in_workbook === false)
+      const ignoredByDefault = (d.kind === 'sheet' && (d.created_by_macro || d.written_by_macro || d.in_workbook === false))
+        || (d.kind === 'external_file' && d.written_by_macro)
       out[key] = { role, selectionId: prev?.selectionId ?? match?.id, ignored: prev?.ignored ?? (ignoredByDefault && !match) }
     }
     return out
@@ -154,9 +178,9 @@ export default function MacroImport() {
         return { ...d, role: !s?.ignored && s?.selectionId ? s.role : undefined, ignored: !!s?.ignored }
       })
       const run = await api.post<Run>('/api/runs', {
-        service_id: 'macro_to_workflow', bindings,
-        title: `Macro → workflow: ${analysis?.workbook.name ?? entry ?? 'pasted code'}`,
-        options: { macro_name: entry || analysis?.workbook.name || 'Macro', entry, instructions, include_samples: samples,
+        service_id: L.service, bindings,
+        title: `${L.Noun} → workflow: ${analysis?.workbook.name ?? (entry || 'pasted code')}`,
+        options: { macro_name: entry || analysis?.workbook.name || L.Noun, entry, instructions, include_samples: samples,
                    sample_rows: 5, modules: modules.map((m) => ({ name: m.name, code: m.code })), dependencies: depList,
                    actions: analysis?.actions ?? [] },
       })
@@ -164,14 +188,14 @@ export default function MacroImport() {
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
-  const stepNames = ['Choose the macro', 'Review the code', 'Connect its data', 'Translate with AI']
+  const stepNames = [`Choose the ${L.noun}`, 'Review the code', 'Connect its data', 'Translate with AI']
   return (
     <>
       <div className="crumbs"><Link to="/">Workflows</Link> /</div>
       <div className="page-head">
         <div>
-          <h1>Turn an Excel macro into a workflow</h1>
-          <p className="sub">The macro is only read, never run. Your AI chatbot proposes the steps; the app checks them against your real data.</p>
+          <h1>{L.title}</h1>
+          <p className="sub">The {L.noun} is only read, never run. Your AI chatbot proposes the steps; the app checks them against your real data.</p>
         </div>
       </div>
       <div className="steps-indicator">
@@ -190,24 +214,24 @@ export default function MacroImport() {
       {step === 1 && (
         <div className="card stack">
           <div className="tabs">
-            <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>Macro workbook</button>
+            <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>{L.fileTab}</button>
             <button className={tab === 'paste' ? 'active' : ''} onClick={() => setTab('paste')}>Paste the code</button>
           </div>
           {tab === 'file' ? (
             <>
-              <DropZone onFiles={onFiles} accept=".xlsm,.xlsb,.xls,.xltm,.xlam,.bas,.cls">
-                {busy ? <><Spinner /> Reading the macro…</> : <>
-                  <div className="macro-badge"><FileIcon kind="excel" size={36} /><span>VBA</span></div>
-                  <b>Drop the macro-enabled workbook here</b>
-                  <span className="muted small">.xlsm, .xlsb, .xls — or an exported .bas module · click to choose</span>
+              <DropZone onFiles={onFiles} accept={L.accept}>
+                {busy ? <><Spinner /> Reading the {L.noun}…</> : <>
+                  <CodeBadge language={language} size={36} />
+                  <b>{L.drop}</b>
+                  <span className="muted small">{L.dropHint}</span>
                 </>}
               </DropZone>
               <details>
                 <summary className="muted" style={{ cursor: 'pointer' }}>Or open it from where it is (shared drive…)</summary>
                 <div className="stack" style={{ marginTop: 8 }}>
                   <div className="row" style={{ flexWrap: 'nowrap' }}>
-                    <input placeholder="Full path, e.g. S:\Finance\Monthly Report.xlsm" value={path} onChange={(e) => setPath(e.target.value)} />
-                    <button className="primary" disabled={!path.trim() || busy} onClick={() => analyse({ path: path.trim().replace(/^"|"$/g, '') })}>Read macro</button>
+                    <input placeholder={`Full path, e.g. ${L.pathHint}`} value={path} onChange={(e) => setPath(e.target.value)} />
+                    <button className="primary" disabled={!path.trim() || busy} onClick={() => analyse({ path: path.trim().replace(/^"|"$/g, '') })}>Read {L.noun}</button>
                   </div>
                   <FileBrowser onPick={(p) => { setPath(p); analyse({ path: p }) }} selected={[path]} />
                 </div>
@@ -215,9 +239,9 @@ export default function MacroImport() {
             </>
           ) : (
             <>
-              <p className="muted small">In Excel press <b>Alt+F11</b>, open the module, select all (Ctrl+A), copy, and paste it here. Useful when the workbook is protected or the macro lives in your Personal workbook.</p>
-              <textarea className="code" rows={14} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={'Sub MonthlyReport()\n    ...\nEnd Sub'} />
-              <div><button className="primary" disabled={!pasted.trim() || busy} onClick={() => analyse({ code: pasted, name: 'Pasted code' })}>Read macro</button></div>
+              <p className="muted small">{L.pasteHelp}</p>
+              <textarea className="code" rows={14} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={L.placeholder} />
+              <div><button className="primary" disabled={!pasted.trim() || busy} onClick={() => analyse({ code: pasted, name: 'Pasted code' })}>Read {L.noun}</button></div>
             </>
           )}
         </div>
@@ -228,13 +252,13 @@ export default function MacroImport() {
           <div className="grid sidebar-left">
             <div className="card stack">
               <div className="row" style={{ flexWrap: 'nowrap' }}>
-                <div className="macro-badge sm"><FileIcon kind="excel" size={26} /><span>VBA</span></div>
+                <CodeBadge language={language} size={26} small />
                 <div style={{ minWidth: 0 }}>
                   <b className="ellipsis">{analysis.workbook.name ?? 'Pasted code'}</b>
-                  <div className="faint small">{analysis.modules.length} module(s) with code</div>
+                  <div className="faint small">{analysis.modules.length} {L.unit}(s) with code</div>
                 </div>
               </div>
-              <h3 style={{ marginBottom: 0 }}>Modules to translate</h3>
+              <h3 style={{ marginBottom: 0 }}>{L.unit === 'file' ? 'Code to translate' : 'Modules to translate'}</h3>
               {analysis.modules.map((m) => (
                 <div key={m.name} className={`module-row${viewing === m.name ? ' active' : ''}`} onClick={() => setViewing(m.name)}>
                   <input type="checkbox" checked={!!included[m.name]} onClick={(e) => e.stopPropagation()} onChange={(e) => setIncluded({ ...included, [m.name]: e.target.checked })} aria-label={`Include ${m.name}`} />
@@ -244,17 +268,17 @@ export default function MacroImport() {
                   </div>
                 </div>
               ))}
-              <Field label="Main macro (the one you run)" help="The AI follows the procedures it calls.">
+              <Field label={L.entryLabel} help={language === 'python' ? 'Leave empty if the script runs top to bottom.' : 'The AI follows the procedures it calls.'}>
                 <select value={entry} onChange={(e) => setEntry(e.target.value)}>
-                  <option value="">Let the AI decide</option>
-                  {analysis.modules.filter((m) => included[m.name]).flatMap((m) => m.procedures.filter((p) => p.kind === 'sub').map((p) => (
+                  <option value="">{language === 'python' ? 'Whole script' : 'Let the AI decide'}</option>
+                  {analysis.modules.filter((m) => included[m.name]).flatMap((m) => m.procedures.filter((p) => p.kind === L.entryKind).map((p) => (
                     <option key={`${m.name}.${p.name}`} value={p.name}>{p.name} ({m.name})</option>
                   )))}
                 </select>
               </Field>
               {analysis.actions.length > 0 && (
                 <div className="alert warn small">
-                  <b>The macro also does things a workflow won’t:</b>
+                  <b>The {L.noun} also does things a workflow won’t:</b>
                   <ul>{analysis.actions.map((a) => <li key={a.action}>{a.action} <span className="faint mono">({a.lines.slice(0, 3).join(', ')})</span></li>)}</ul>
                   These are listed for the AI and in the result, so nothing is silently dropped.
                 </div>
@@ -290,11 +314,11 @@ export default function MacroImport() {
       {step === 3 && analysis && (
         <div className="stack">
           <div className="alert info">
-            We found <b>{analysis.dependencies.length}</b> data reference(s) in the macro. Connect each one to a table so the workflow can run without the macro.
+            We found <b>{analysis.dependencies.length}</b> data reference(s) in the {L.noun}. Connect each one to a table so the workflow can run without the {L.noun}.
             Anything marked <b>Missing</b> must be added as a source first.
           </div>
           <div className="card flush">
-            {analysis.dependencies.length === 0 && <div className="empty small">No file or sheet names were found in the code. Add the data the macro works on below.</div>}
+            {analysis.dependencies.length === 0 && <div className="empty small">No file or sheet names were found in the code. Add the data the {L.noun} works on below.</div>}
             {analysis.dependencies.map((d) => {
               const key = depKey(d)
               const st = deps[key]
@@ -307,8 +331,10 @@ export default function MacroImport() {
                   <div className="dep-main">
                     <div><span className="badge">{KIND_TEXT[d.kind].label}</span> <b className="break">{d.reference}</b></div>
                     <div className="faint small">{KIND_TEXT[d.kind].help} Used at <span className="mono">{d.lines.slice(0, 4).join(', ')}{d.lines.length > 4 ? '…' : ''}</span>
-                      {d.created_by_macro && ' · the macro appears to create this sheet itself'}
-                      {d.written_by_macro && ' · the macro clears this sheet and writes its results here (that is what the workflow will produce)'}
+                      {d.created_by_macro && ` · the ${L.noun} appears to create this sheet itself`}
+                      {d.written_by_macro && (d.kind === 'sheet'
+                        ? ` · the ${L.noun} clears this sheet and writes its results here (that is what the workflow will produce)`
+                        : ` · the ${L.noun} writes this file itself (likely its output)`)}
                       {d.sheets?.length ? ` · reads sheet${d.sheets.length > 1 ? 's' : ''} ${d.sheets.join(', ')}` : ''}
                       {d.kind === 'sheet' && d.in_workbook === false && !d.created_by_macro && ' · not found in this workbook'}
                     </div>
@@ -346,7 +372,7 @@ export default function MacroImport() {
           </div>
           <div className="row">
             <button onClick={() => setStep(2)}>← Back</button>
-            <button onClick={() => setAdding({})}>+ Add other data the macro uses</button>
+            <button onClick={() => setAdding({})}>+ Add other data the {L.noun} uses</button>
             <span className="spacer" />
             {unresolved.length > 0 && <span className="small" style={{ color: 'var(--bad)' }}>{unresolved.length} item(s) still missing</span>}
             <button className="primary" disabled={unresolved.length > 0 || Object.keys(bindings).length === 0} onClick={() => setStep(4)}>Next: translate →</button>
@@ -359,7 +385,7 @@ export default function MacroImport() {
           <div className="card stack">
             <h2>What the AI will receive</h2>
             <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              <li>The code of {modules.length} module(s) ({codeChars.toLocaleString()} characters){entry && <>, starting from <b className="mono">{entry}</b></>}</li>
+              <li>The code of {modules.length} {L.unit}(s) ({codeChars.toLocaleString()} characters){entry && <>, starting from <b className="mono">{entry}</b></>}</li>
               <li>For each connected table: column names, Excel column letters, types and counts{samples ? ', plus 5 sample rows' : ' (no values)'}</li>
               {Object.entries(bindings).map(([r, id]) => <li key={r} className="faint"><span className="mono">{r}</span> → {byId[id]?.label}</li>)}
               <li>The list of workflow operations it may use</li>
@@ -374,9 +400,9 @@ export default function MacroImport() {
             <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
               <li>We build a prompt; you copy it into your approved AI chatbot.</li>
               <li>Paste the reply back. The app checks every step against your data.</li>
-              <li>Open the result in the Workflow Studio, review each step (they link back to macro lines), save and run.</li>
+              <li>Open the result in the Workflow Studio, review each step (they link back to {L.noun} lines), save and run.</li>
             </ol>
-            <label className="check"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this macro code and data description may be shared with the approved chatbot.</label>
+            <label className="check"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this {L.noun} code and data description may be shared with the approved chatbot.</label>
             <div className="row">
               <button onClick={() => setStep(3)}>← Back</button>
               <span className="spacer" />
@@ -389,11 +415,21 @@ export default function MacroImport() {
       {busy && step !== 1 && step !== 4 && <Loading />}
       {adding && (
         <AddDataModal
-          title={adding.key ? `Connect: ${adding.key.split(':').slice(1).join(':')}` : 'Add data the macro uses'}
+          title={adding.key ? `Connect: ${adding.key.split(':').slice(1).join(':')}` : `Add data the ${L.noun} uses`}
           hint={adding.hint} presetSource={adding.presetSource} presetSheet={adding.presetSheet}
           onClose={() => setAdding(null)} onPick={picked}
         />
       )}
     </>
+  )
+}
+
+/** The file icon with a small language tag, used on the macro and script import tiles. */
+export function CodeBadge({ language, size, small }: { language: CodeLanguage; size: number; small?: boolean }) {
+  return (
+    <div className={`macro-badge${small ? ' sm' : ''}${language === 'python' ? ' python' : ''}`}>
+      <FileIcon kind={language === 'python' ? 'code' : 'excel'} ext={language === 'python' ? '.py' : undefined} size={size} />
+      <span>{LANG[language].badge}</span>
+    </div>
   )
 }

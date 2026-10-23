@@ -69,7 +69,7 @@ function loadLayout(): Layout {
   try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') } } catch { return DEFAULT_LAYOUT }
 }
 type Preview = TransformPreview & { data?: TransformPreview['data'] & { profile: ColumnProfile[] } }
-interface MacroInfo { not_translated: { macro_lines: string; what_it_does: string; why: string }[]; missing_data: { reference: string; why_needed: string }[] }
+interface MacroInfo { language: 'vba' | 'python'; not_translated: { macro_lines: string; what_it_does: string; why: string }[]; missing_data: { reference: string; why_needed: string }[] }
 interface History { past: Recipe[]; present: Recipe; future: Recipe[] }
 
 const emptyRecipe = (): Recipe => ({ schema_version: 1, inputs: [{ role: 'data' }], base: 'data', steps: [], output: { name: 'result', formats: ['xlsx'] } })
@@ -185,9 +185,10 @@ export default function Studio() {
         if (r) resetRecipe({ ...emptyRecipe(), ...r })
         setBindings((run.config.bindings as Record<string, string>) ?? {})
         if (run.service_id !== 'transformation') setOrigin('ai')
-        if (run.service_id === 'macro_to_workflow') {
-          setMacroInfo({ not_translated: (run.state.not_translated as MacroInfo['not_translated']) ?? [], missing_data: (run.state.missing_data as MacroInfo['missing_data']) ?? [] })
-          setMeta((m) => ({ ...m, name: `${String((run.config.options as Record<string, unknown>)?.macro_name || 'Macro')} (workflow)` }))
+        if (run.service_id === 'macro_to_workflow' || run.service_id === 'python_to_workflow') {
+          const python = run.service_id === 'python_to_workflow'
+          setMacroInfo({ language: python ? 'python' : 'vba', not_translated: (run.state.not_translated as MacroInfo['not_translated']) ?? [], missing_data: (run.state.missing_data as MacroInfo['missing_data']) ?? [] })
+          setMeta((m) => ({ ...m, name: `${String((run.config.options as Record<string, unknown>)?.macro_name || (python ? 'Script' : 'Macro'))} (workflow)` }))
         }
       }).catch((e: Error) => toast(e.message, true)).finally(done)
     } else if (collectionId) {
@@ -644,7 +645,7 @@ export default function Studio() {
             <h2 style={{ margin: '8px 0 0' }}>Start with your data</h2>
             <p className="muted" style={{ margin: 0 }}>Drop an Excel or CSV file anywhere here, or</p>
             <button className="primary" onClick={() => setAddData({ role: recipe.base })}>Choose data…</button>
-            <Link to="/workflows/from-macro" className="small muted" style={{ marginTop: 12 }}>Already have an Excel macro that does this? Import it instead</Link>
+            <span className="small muted" style={{ marginTop: 12 }}>Already have code that does this? Import an <Link to="/workflows/from-macro">Excel macro</Link> or a <Link to="/workflows/from-python">Python script</Link> instead</span>
           </div>
         ) : (
           <FlowCanvas recipe={recipe} bindings={bindings} byId={byId} preview={preview} sel={sel} setSel={setSel}
@@ -725,7 +726,7 @@ export default function Studio() {
                   <button className="ghost icon" disabled={i === steps.length - 1} onClick={() => moveStep(i, 1, branch)} title="Move later">→</button>
                   <button className="ghost icon" onClick={() => deleteStep(i, branch)} title="Delete step (Del)">🗑</button>
                 </div>
-                {typeof s.note === 'string' && s.note.startsWith('From macro') && <div className="alert info small">📜 {s.note}</div>}
+                {isCodeNote(s.note) && <div className="alert info small">📜 {s.note}</div>}
                 {isErrAt(i, branch) && <div className="alert bad small">{err!.message}</div>}
                 {!branch && groupOf(groups, i) && (
                   <div className="faint small">In group <a href="#" onClick={(e) => { e.preventDefault(); setSel({ kind: 'group', id: groupOf(groups, i)!.id }) }}>{groupOf(groups, i)!.name}</a></div>
@@ -739,7 +740,7 @@ export default function Studio() {
                 {rep && Object.keys(rep.details).length > 0 && (
                   <div className="faint small">{Object.entries(rep.details).map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(' · ')}</div>
                 )}
-                {!(typeof s.note === 'string' && s.note.startsWith('From macro')) && (
+                {!(isCodeNote(s.note)) && (
                   <Field label="Note (optional)">
                     <input value={String(s.note ?? '')} onChange={(e) => update({ ...s, note: e.target.value || undefined })} placeholder="Why this step exists" />
                   </Field>
@@ -758,7 +759,7 @@ export default function Studio() {
                   <span className="op-dot" style={{ background: OP_COLOR.group }}><OpIcon op="group" size={16} color="#fff" /></span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <h2 style={{ margin: 0 }}>{g.kind === 'macro' ? '📜 ' : ''}{g.name}</h2>
-                    <div className="faint small">{g.kind === 'macro' ? 'Translated Excel macro' : 'Step group'} · {g.end - g.start + 1} steps{last ? ` · ${preview!.steps[g.start]?.rows_in.toLocaleString()} → ${last.rows_out.toLocaleString()} rows` : ''}</div>
+                    <div className="faint small">{g.kind === 'macro' ? translatedLabel(g) : 'Step group'} · {g.end - g.start + 1} steps{last ? ` · ${preview!.steps[g.start]?.rows_in.toLocaleString()} → ${last.rows_out.toLocaleString()} rows` : ''}</div>
                   </div>
                 </div>
                 <Field label="Name"><input value={g.name} onChange={(e) => updateGroup(g.id, { name: e.target.value || g.name })} /></Field>
@@ -778,7 +779,7 @@ export default function Studio() {
                   </div>
                 </div>
                 {g.inputs && g.inputs.length > 0 && <div className="faint small">Also includes the own steps of: {g.inputs.join(', ')}</div>}
-                {g.source?.macro_name && <div className="faint small">From macro <b>{g.source.macro_name}</b>{g.source.modules ? ` (${g.source.modules})` : ''}</div>}
+                {g.source?.macro_name && <div className="faint small">From {g.source.language === 'python' ? 'script' : 'macro'} <b>{g.source.macro_name}</b>{g.source.modules ? ` (${g.source.modules})` : ''}</div>}
                 <div className="row">
                   <button onClick={() => toggleGroup(g.id)}>{open ? '▸ Collapse' : '▾ Expand'}</button>
                   <button onClick={() => ungroup(g.id)} title="Keep the steps, remove the grouping">Ungroup</button>
@@ -858,17 +859,22 @@ export default function Studio() {
   )
 }
 
+/** Notes the AI translation puts on each step, pointing back to the macro or script lines. */
+const isCodeNote = (note: unknown) => typeof note === 'string' && /^From (macro|code) /.test(note)
+const translatedLabel = (g: StepGroup) => g.source?.language === 'python' ? 'Translated Python script' : 'Translated Excel macro'
+
 function MacroBanner({ info, onAddData }: { info: MacroInfo; onAddData: () => void }) {
+  const noun = info.language === 'python' ? 'script' : 'macro'
   return (
     <details className="alert info prep-banner" open={info.missing_data.length > 0}>
       <summary style={{ cursor: 'pointer' }}>
-        <b>Translated from an Excel macro.</b> Click each step to see which macro lines it comes from.
+        <b>Translated from {info.language === 'python' ? 'a Python script' : 'an Excel macro'}.</b> Click each step to see which {noun} lines it comes from.
         {info.not_translated.length > 0 && <> · {info.not_translated.length} part(s) not translated</>}
         {info.missing_data.length > 0 && <> · <span style={{ color: 'var(--bad)' }}>{info.missing_data.length} dataset(s) missing</span></>}
       </summary>
       {info.missing_data.length > 0 && (
         <div style={{ marginTop: 8 }}>
-          <b className="small">The AI says the macro also needs:</b>
+          <b className="small">The AI says the {noun} also needs:</b>
           <ul className="small">{info.missing_data.map((m, i) => <li key={i}><b>{m.reference}</b> — {m.why_needed}</li>)}</ul>
           <button className="sm" onClick={onAddData}>Add data…</button>
         </div>
@@ -965,7 +971,7 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
           <OpIcon op={s.op} size={branch ? 17 : 20} color="#fff" />
           {bad && <span className="flow-flag bad">!</span>}
           {!bad && rep && rep.warnings.length > 0 && <span className="flow-flag warn">{rep.warnings.length}</span>}
-          {typeof s.note === 'string' && s.note.startsWith('From macro') && <span className="flow-flag macro" title={s.note}>📜</span>}
+          {isCodeNote(s.note) && <span className="flow-flag macro" title={s.note}>📜</span>}
         </div>
         <div className="flow-label">
           <div className="ellipsis"><b>{OP_LABEL[s.op]}</b></div>
@@ -986,7 +992,7 @@ function FlowCanvas({ recipe, bindings, byId, preview, sel, setSel, addAt, setAd
         title={`${g.name} — ${g.end - g.start + 1} steps. Double-click to expand.`}>
         <div className="flow-shape" style={{ background: OP_COLOR.group }}>
           <OpIcon op="group" size={21} color="#fff" />
-          {g.kind === 'macro' && <span className="flow-flag macro" title="Translated Excel macro">📜</span>}
+          {g.kind === 'macro' && <span className="flow-flag macro" title={translatedLabel(g)}>📜</span>}
           {bad && <span className="flow-flag bad">!</span>}
           {!bad && warns > 0 && <span className="flow-flag warn">{warns}</span>}
           <button className="group-toggle" title="Expand to see the steps inside" aria-label="Expand group" onClick={(e) => { e.stopPropagation(); onToggleGroup(g.id, true) }}>

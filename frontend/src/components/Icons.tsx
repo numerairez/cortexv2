@@ -3,10 +3,10 @@ import type { SourceKind } from '../types'
 
 // ---------- file-type icons (document with folded corner + type mark)
 
-type FileType = 'excel' | 'csv' | 'pdf' | 'word' | 'text' | 'markdown' | 'confluence' | 'web' | 'json'
+type FileType = 'excel' | 'csv' | 'pdf' | 'word' | 'text' | 'markdown' | 'confluence' | 'web' | 'json' | 'code'
 
 const FILE_COLORS: Record<FileType, string> = {
-  excel: '#1f7a45', csv: '#3b8f6e', pdf: '#c8352b', word: '#2b5cb8', text: '#6b7586', markdown: '#4a5568', confluence: '#2f6fd6', web: '#6a4fc4', json: '#5b6475',
+  excel: '#1f7a45', csv: '#3b8f6e', pdf: '#c8352b', word: '#2b5cb8', text: '#6b7586', markdown: '#4a5568', confluence: '#2f6fd6', web: '#6a4fc4', json: '#5b6475', code: '#3572a5',
 }
 
 export function fileTypeFor(kind: SourceKind | string | undefined, ext?: string): FileType {
@@ -14,6 +14,7 @@ export function fileTypeFor(kind: SourceKind | string | undefined, ext?: string)
   if (kind === 'confluence') return 'confluence'
   if (kind === 'html' || e === '.html') return 'web'
   if (kind === 'json' || e === '.json') return 'json'
+  if (kind === 'code' || e === '.py' || e === '.ipynb') return 'code'
   if (kind === 'markdown') return 'markdown'
   if (kind === 'xlsx') return 'excel'
   if (kind === 'csv' || e === '.csv' || e === '.tsv') return 'csv'
@@ -49,6 +50,8 @@ function mark(type: FileType): ReactNode {
       return <path d="M8 21.2c2.5-3.6 4.9-3.6 6 -1.2s3.5 2.4 6 -1.2M8 16.8c2.5 3.6 4.9 3.6 6 1.2s3.5-2.4 6 1.2" fill="none" stroke={w} strokeWidth="1.6" strokeLinecap="round" />
     case 'web':
       return <path d="M11 15.5l-3 3.3 3 3.3M17 15.5l3 3.3-3 3.3M15 14.5l-2 8.6" fill="none" stroke={w} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    case 'code':
+      return <path d="M11 15.5l-3 3.3 3 3.3M17 15.5l3 3.3-3 3.3" fill="none" stroke={w} strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
     case 'json':
       return <text x="14" y="22.6" textAnchor="middle" fontSize="8" fontWeight="800" fill={w} fontFamily="ui-monospace, monospace">{'{ }'}</text>
     default:

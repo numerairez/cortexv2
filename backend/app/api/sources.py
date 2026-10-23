@@ -5,13 +5,14 @@ from __future__ import annotations
 import hashlib
 import uuid
 from pathlib import Path
+from typing import Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from ..config import get_paths
-from ..connectors import vba
+from ..connectors import pycode, vba
 from ..core import collections, context, runs, sources, templates
 from ..services import prompting
 from ..storage import db
@@ -219,7 +220,7 @@ def context_preview(body: ContextPreviewBody):
 
 # ---- uploads (drag & drop) and macro analysis
 
-UPLOAD_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".pdf", ".docx", ".txt", ".md", ".xlsb", ".xls", ".bas", ".cls"}
+UPLOAD_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".pdf", ".docx", ".txt", ".md", ".xlsb", ".xls", ".bas", ".cls", ".py", ".ipynb"}
 SOURCE_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".pdf", ".docx", ".txt", ".md"}
 
 
@@ -255,6 +256,7 @@ class MacroBody(BaseModel):
     path: str | None = None
     code: str | None = Field(default=None, max_length=500_000)
     name: str | None = None
+    language: Literal["vba", "python"] = "vba"
 
 
 @router.post("/macros/analyse")
@@ -265,7 +267,8 @@ def analyse_macro(body: MacroBody):
         if not path.is_absolute() or not path.is_file():
             raise sources.SourceError("File not found", 404)
     try:
-        result = vba.load(path=path, code=body.code, name=body.name)
+        python = body.language == "python" or (path is not None and path.suffix.lower() in pycode.SCRIPT_EXTS)
+        result = (pycode if python else vba).load(path=path, code=body.code, name=body.name)
     except vba.VBAError as e:
         raise sources.SourceError(str(e))
     if path is not None:
