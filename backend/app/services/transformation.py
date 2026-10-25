@@ -198,10 +198,26 @@ def execute_to_artifacts(recipe: Recipe, bindings: dict[str, str], title: str,
     runs.update_run(run["id"], state={"progress": {"stage": "queued", "message": "Starting…", "done": 0,
                                                    "total": _total_steps(recipe), "started": time.time()}})
     if background:
-        threading.Thread(target=_perform_run, args=(run["id"], recipe, bindings, title), daemon=True).start()
+        threading.Thread(target=_perform_run, args=(run["id"], recipe, bindings, title, recipe_version_id), daemon=True).start()
         return runs.get_run(run["id"])
-    _perform_run(run["id"], recipe, bindings, title)
+    _perform_run(run["id"], recipe, bindings, title, recipe_version_id)
     return runs.get_run(run["id"])
+
+
+def _lineage(run_id: str, recipe_version_id: str | None, title: str) -> dict:
+    """Which workflow (and version) a run's outputs came from, for datasets kept in the Library."""
+    row = db.query_one("SELECT v.recipe_id, v.version, r.name FROM recipe_versions v JOIN recipes r ON r.id = v.recipe_id "
+                       "WHERE v.id = ?", (recipe_version_id,)) if recipe_version_id else None
+    return {"run_id": run_id, "run_at": db.now(), "recipe_id": row["recipe_id"] if row else None,
+            "recipe_version": row["version"] if row else None, "workflow": row["name"] if row else title}
+
+
+def _output_label(name: str, title: str, out_id: str) -> str:
+    """A dataset name for an output: its file name without date/time placeholders, or the workflow's title."""
+    clean = name.replace("{date}", "").replace("{time}", "").strip(" -_")
+    if out_id == "main" and (not clean or clean.lower() == "result"):
+        return title
+    return clean or title
 
 
 def _total_steps(recipe: Recipe) -> int:
@@ -234,7 +250,8 @@ def _free_name(dest: Path) -> Path:
     return candidate
 
 
-def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: str) -> None:
+def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: str,
+                 recipe_version_id: str | None = None) -> None:
     started = time.time()
     total = _total_steps(recipe)
     progress = {"stage": "read", "message": "", "done": 0, "total": total, "started": started,
@@ -247,6 +264,9 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
     try:
         # 0. Check the output folder first, so a missing share fails before any work is done.
         out_folder = check_output_folder(recipe.output.folder) if recipe.output.folder else None
+        for o in recipe.extra_outputs:
+            if o.folder:
+                check_output_folder(o.folder)
 
         # 1. Read inputs one by one so the user sees which file is being opened.
         tables: dict[str, pd.DataFrame] = {}
@@ -268,8 +288,9 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
             report(stage="steps", done=done["n"], message=(f"{branch}: " if branch else "") + f"step {i + 1} — {label}")
             done["n"] += 1
 
+        taps = [(o.branch, o.after) for o in recipe.extra_outputs]
         try:
-            res = executor.execute(recipe, tables, on_step=on_step)
+            res = executor.execute(recipe, tables, on_step=on_step, taps=taps)
         except executor.StepError as e:
             where = f"Input '{e.branch}' step" if e.branch else "Step"
             step = f"{where} {e.step_index + 1}: " if e.step_index is not None else ""
@@ -296,29 +317,58 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
             summary_rows.append(("Warning", w))
         summary_rows.append(("Output rows", len(res.df)))
 
-        base = output_basename(recipe.output.name)
+        # Every output: the main result plus any taken part-way through the flow.
+        outputs: list[tuple[str, Any, pd.DataFrame]] = [("main", recipe.output, res.df)]
+        for o in recipe.extra_outputs:
+            df_o = res.taps.get((o.branch, o.after))
+            if df_o is not None:
+                outputs.append((o.id, o, df_o.reset_index(drop=True)))
+        lineage = _lineage(run_id, recipe_version_id, title)
         saved_to: list[str] = []
         save_error = None
-        for fmt in recipe.output.formats:
-            report(stage="write", done=total, message=f"Writing {base}.{fmt}…")
-            p = runs.artifact_path(run_id, f"{base}.{fmt}")
-            if fmt == "xlsx":
-                export.write_xlsx(res.df, p, summary_rows + ([("Saved to folder", str(out_folder))] if out_folder else []))
-            else:
-                export.write_csv(res.df, p)
-            meta: dict[str, Any] = {"rows": int(len(res.df))}
-            if out_folder and not save_error:
-                dest = out_folder / p.name
-                if recipe.output.if_exists == "keep_both":
-                    dest = _free_name(dest)
-                report(message=f"Saving {dest.name} to {out_folder}…")
-                try:
-                    shutil.copy2(p, dest)
-                    meta["saved_to"] = str(dest)
-                    saved_to.append(str(dest))
-                except OSError as e:   # e.g. the file is open in Excel, or the share went away
-                    save_error = f"Could not save to {dest}: {e.strerror or e}. The result is still available here to download."
-            runs.register_artifact(run_id, fmt, p, meta)
+        out_summaries: list[dict] = []
+        used_names: set[str] = set()
+        for out_id, out, df_out in outputs:
+            base = output_basename(out.name)
+            n = 2
+            while base.lower() in used_names:   # two outputs with the same file name keep both
+                base = f"{output_basename(out.name)} ({n})"
+                n += 1
+            used_names.add(base.lower())
+            label = _output_label(out.name, title, out_id)
+            folder = (check_output_folder(out.folder) if out.folder else None) if out_id != "main" else out_folder
+            files: list[str] = []
+            for fmt in out.formats:
+                report(stage="write", done=total, message=f"Writing {base}.{fmt}…")
+                p = runs.artifact_path(run_id, f"{base}.{fmt}")
+                if fmt == "xlsx":
+                    export.write_xlsx(df_out, p, summary_rows + [("Output", label)]
+                                      + ([("Saved to folder", str(folder))] if folder else []))
+                else:
+                    export.write_csv(df_out, p)
+                meta: dict[str, Any] = {"rows": int(len(df_out)), "output": out_id, "output_name": label}
+                if folder and not save_error:
+                    dest = folder / p.name
+                    if out.if_exists == "keep_both":
+                        dest = _free_name(dest)
+                    report(message=f"Saving {dest.name} to {folder}…")
+                    try:
+                        shutil.copy2(p, dest)
+                        meta["saved_to"] = str(dest)
+                        saved_to.append(str(dest))
+                    except OSError as e:   # e.g. the file is open in Excel, or the share went away
+                        save_error = f"Could not save to {dest}: {e.strerror or e}. The result is still available here to download."
+                runs.register_artifact(run_id, fmt, p, meta)
+                files.append(p.name)
+            entry: dict[str, Any] = {"id": out_id, "name": label, "rows": int(len(df_out)),
+                                     "columns": int(df_out.shape[1]), "files": files}
+            if out.save_to_library:
+                report(message=f"Adding {label} to your Library…")
+                ds = sources.publish_output(f"{lineage['recipe_id'] or run_id}_{out_id}", label, df_out,
+                                            {**lineage, "output_id": out_id, "output_name": label,
+                                             "rows": int(len(df_out))})
+                entry["dataset_id"] = ds["id"]
+            out_summaries.append(entry)
         duration = int((time.time() - started) * 1000)
         runs.update_run(
             run_id, status="completed", snapshot_id=snap,
@@ -326,6 +376,7 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
                    "branches": {r: [x.as_dict() for x in reps] for r, reps in res.branches.items()},
                    "progress": {**progress, "stage": "done", "done": total, "message": "Done"}},
             errors=[], summary={"output_rows": int(len(res.df)), "output_columns": int(res.df.shape[1]),
+                                "outputs": out_summaries,
                                 "steps": len(res.steps), "warnings": problems + res.warnings + ([save_error] if save_error else []),
                                 "inputs": len(info), "duration_ms": duration,
                                 "saved_to": saved_to, "output_folder": str(out_folder) if out_folder else None,
@@ -416,9 +467,10 @@ def operations_section() -> list[str]:
         "- aggregate functions: sum, mean, median, min, max, count, count_distinct, first, last",
         "- Column names must match exactly (case-sensitive). Convert text to number/date before arithmetic or sums.",
         "- \"inputs\" must use exactly the input role names given above; \"base\" is the role the main flow starts from.",
-        "- A non-base input may have its own \"steps\" (any operation except join/append_rows). They run first, so the "
-        "main flow can join/append the prepared result. Use this when the same data is needed twice with different "
-        "preparation (e.g. two roles bound to the same file: this month vs. last month, or two filtered subsets).",
+        "- A non-base input may have its own \"steps\". They run first, so the main flow can join/append the prepared "
+        "result. Use this when the same data is needed twice with different preparation (e.g. two roles bound to the "
+        "same file: this month vs. last month, or two filtered subsets). An input's own steps may also join/append "
+        "other inputs (never itself, and never in a loop), so several inputs can be merged before the main flow.",
     ]
     return lines
 

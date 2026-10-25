@@ -102,24 +102,32 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
     } catch (e) { setError((e as Error).message) } finally { setSaving(false) }
   }
 
+  // Numbered steps; a CSV or single-sheet workbook skips straight to the header row.
+  const multi = sheets.length > 1
+  const n = (k: number) => (multi ? k : k - 1)
   return (
     <div className="stack">
       <div className="row" style={{ flexWrap: 'nowrap' }}>
         <FileIcon kind={source.kind} ext={extOf(source.name)} size={28} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <b className="ellipsis">{source.name}</b>
-          <div className="faint small">Pick the sheet, then click the row that holds the column headers.</div>
+          <div className="muted small">{multi ? 'Two quick choices' : 'One quick check'} so Flowbook reads this file the right way.</div>
         </div>
         {onBack && <button className="sm" onClick={onBack}>← Back</button>}
       </div>
-      {sheets.length > 1 && (
-        <div className="chips">
-          {sheets.map((s) => (
-            <button key={s} className={`sm${s === sheet ? ' primary' : ''}`} onClick={() => setSheet(s)}>{s}</button>
-          ))}
-        </div>
+      {multi && (
+        <section className="setup-step">
+          <h4><span className="step-num">1</span>Which sheet holds your table? <span className="muted small">· {sheets.length} sheets in this workbook</span></h4>
+          <div className="sheet-tabs" role="tablist">
+            {sheets.map((s) => (
+              <button key={s} role="tab" aria-selected={s === sheet} className={`sheet-tab${s === sheet ? ' active' : ''}`} onClick={() => setSheet(s)}>{s}</button>
+            ))}
+          </div>
+        </section>
       )}
       <ErrorBox error={error} />
+      <section className="setup-step">
+      <h4><span className="step-num">{n(2)}</span>Click the row with the column headers{preview?.suggested_header_row && preview.suggested_header_row === header && <span className="badge ok" style={{ marginLeft: 8 }}>row {header} looks right</span>}</h4>
       {!preview ? <Loading /> : (
         <div className="table-wrap card flush" style={{ maxHeight: 300 }}>
           <table className="sheet">
@@ -138,15 +146,18 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
       <div className="row">
         <span className="small">Headers on row</span>
         <input type="number" min={1} className="inline-input" style={{ width: 80 }} value={header ?? ''} onChange={(e) => setHeader(Math.max(1, Number(e.target.value) || 1))} aria-label="Header row" />
-        {preview?.suggested_header_row && preview.suggested_header_row === header && <span className="badge ok">suggested</span>}
         <span className="spacer" />
         {profile && <span className="muted small">{profile.row_count.toLocaleString()} rows · {profile.columns.length} columns: {profile.columns.slice(0, 5).map((c) => c.name).join(', ')}{profile.columns.length > 5 ? '…' : ''}</span>}
       </div>
       {profile?.warnings.length ? <div className="alert warn small"><ul>{profile.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div> : null}
-      <div className="row" style={{ flexWrap: 'nowrap' }}>
-        <input placeholder="Name for this data (optional)" value={label} onChange={(e) => setLabel(e.target.value)} />
-        <button className="primary" disabled={!profile || saving} onClick={save}>{saving ? 'Saving…' : 'Use this data'}</button>
-      </div>
+      </section>
+      <section className="setup-step">
+        <h4><span className="step-num">{n(3)}</span>Name it and add it</h4>
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <input placeholder="Name for this data (optional)" value={label} onChange={(e) => setLabel(e.target.value)} />
+          <button className="primary" disabled={!profile || saving} onClick={save}>{saving ? 'Saving…' : 'Use this data'}</button>
+        </div>
+      </section>
     </div>
   )
 }
@@ -154,17 +165,19 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
 /**
  * The single "add data" experience: pick something you already have, or drop / browse a file,
  * then confirm sheet + header row. Calls onPick with a ready-to-use sheet selection.
+ * With onPickMany, data you already added is ticked off and added together.
  */
-export function AddDataModal({ onClose, onPick, title = 'Add data', hint, presetSource, presetSheet, exclude = [] }: {
-  onClose: () => void; onPick: (s: Selection) => void; title?: string; hint?: string
-  presetSource?: Source; presetSheet?: string; exclude?: string[]
+export function AddDataModal({ onClose, onPick, onPickMany, title = 'Add data', hint, presetSource, presetSheet, exclude = [], startTab }: {
+  onClose: () => void; onPick: (s: Selection) => void; onPickMany?: (s: Selection[]) => void; title?: string; hint?: string
+  presetSource?: Source; presetSheet?: string; exclude?: string[]; startTab?: 'mine' | 'file' | 'feed'
 }) {
-  const [tab, setTab] = useState<'mine' | 'file' | 'feed'>(presetSource || hint ? 'file' : 'mine')
+  const [tab, setTab] = useState<'mine' | 'file' | 'feed'>(startTab ?? (presetSource || hint ? 'file' : 'mine'))
   const { datasets: selections } = useDatasets()
   const [source, setSource] = useState<Source | null>(presetSource ?? null)
   const [offer, setOffer] = useState<{ sel: Selection; suggestion: TemplateSuggestion & { folder: string; formats: string[] } } | null>(null)
   const [checking, setChecking] = useState(false)
   const [filter, setFilter] = useState('')
+  const [picked, setPicked] = useState<string[]>([])
   const [path, setPath] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -220,8 +233,19 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
     } finally { setBusy(false) }
   }
 
+  const toggle = (id: string) => setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]))
+  const multi = !!onPickMany && tab === 'mine' && !source && !offer && !checking
+  const footer = multi ? <>
+    <span className="muted small" style={{ marginRight: 'auto' }}>{picked.length ? `${picked.length} selected` : 'Tick one or more tables'}</span>
+    <button onClick={onClose}>Cancel</button>
+    <button className="primary" disabled={!picked.length}
+      onClick={() => onPickMany!(picked.map((id) => (selections ?? []).find((s) => s.id === id)!).filter(Boolean))}>
+      {picked.length > 1 ? `Add ${picked.length} tables` : 'Add table'}
+    </button>
+  </> : undefined
+
   return (
-    <Modal title={title} wide onClose={onClose}>
+    <Modal title={title} wide onClose={onClose} footer={footer}>
       {hint && <div className="alert info small" style={{ marginBottom: 12 }}>Looking for <b>{hint}</b>. Find it on your PC or shared drive.</div>}
       {offer ? (
         <TemplateOffer selection={offer.sel} suggestion={offer.suggestion} onDone={(ds) => onPick(ds ?? offer.sel)} />
@@ -243,7 +267,9 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
               ) : (
                 <div className="card flush" style={{ maxHeight: 380, overflow: 'auto' }}>
                   {mine.map((s) => (
-                    <div key={s.id} className="list-item clickable-row" onClick={() => onPick(s)}>
+                    <div key={s.id} className="list-item clickable-row" onClick={() => (onPickMany ? toggle(s.id) : onPick(s))}
+                      style={picked.includes(s.id) ? { background: 'var(--accent-soft)' } : undefined}>
+                      {onPickMany && <input type="checkbox" checked={picked.includes(s.id)} readOnly tabIndex={-1} aria-label={`Select ${s.label}`} />}
                       {s.template
                         ? <span className="tpl-icon"><FileIcon kind={s.source_kind} ext={extOf(s.source_name)} size={26} /><span>📅</span></span>
                         : <FileIcon kind={s.source_kind} ext={extOf(s.source_name)} size={26} />}
@@ -255,7 +281,7 @@ export function AddDataModal({ onClose, onPick, title = 'Add data', hint, preset
                             : `${s.source_name} · ${s.config.sheet === '(csv)' ? 'CSV' : `sheet ${s.config.sheet}`} · headers on row ${s.config.header_row} · ${s.schema?.length ?? 0} columns`}
                         </div>
                       </div>
-                      <span className="btn sm">Use</span>
+                      {!onPickMany && <span className="btn sm">Use</span>}
                     </div>
                   ))}
                 </div>

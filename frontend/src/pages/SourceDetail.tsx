@@ -5,7 +5,10 @@ import { api, qs } from '../api'
 import { DataTable, fmt } from '../components/DataTable'
 import { FileBrowser } from '../components/FileBrowser'
 import { ErrorBox, Field, KindIcon, Loading, Modal, Spinner, StatusBadge, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
-import type { Selection, SelectionCheck, SheetPreview, SheetProfile, Source } from '../types'
+import { RunDialog } from '../components/RunDialog'
+import { WorkflowGraph } from '../components/WorkflowGraph'
+import { bindingId } from '../datasets'
+import type { ProducedBy, Recipe, RecipeDetail, Run, Selection, SelectionCheck, SheetPreview, SheetProfile, Source } from '../types'
 
 export default function SourceDetail() {
   const { id } = useParams()
@@ -45,6 +48,7 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
     onRemoved()
   }
   const tabular = src.kind === 'excel' || src.kind === 'csv'
+  const produced = src.metadata.produced_by
 
   return (
     <>
@@ -58,7 +62,7 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
         </div>
         <div className="row">
           <button onClick={refresh} disabled={busy}>{busy ? <Spinner /> : '↻'} Check for changes</button>
-          {src.kind !== 'confluence' && src.kind !== 'feed' && <button onClick={() => setRelocating(true)}>{src.is_copy ? 'Re-link to original…' : 'Point to a new file…'}</button>}
+          {src.kind !== 'confluence' && src.kind !== 'feed' && !produced && <button onClick={() => setRelocating(true)}>{src.is_copy ? 'Re-link to original…' : 'Point to a new file…'}</button>}
           <button className="danger" onClick={remove}>Remove</button>
         </div>
       </div>
@@ -71,6 +75,7 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
           <button className="sm primary" onClick={() => setRelocating(true)}>Re-link to original…</button>
         </div>
       )}
+      {produced && <WorkflowOrigin produced={produced} onRan={() => { reload(); onChanged?.() }} />}
       <div className="card">
         <dl className="kv">
           <dt>Status</dt><dd><StatusBadge status={src.status} /> {src.status_detail && <span className="muted small">{src.status_detail}</span>}</dd>
@@ -111,6 +116,78 @@ export function SourceDetailView({ id, onRemoved, onChanged, startRelink }: { id
         <RelocateModal source={src} onClose={() => setRelocating(false)} onDone={(s) => { setRelocating(false); setData({ ...src, ...s }); reload(); onChanged?.() }} />
       )}
     </>
+  )
+}
+
+/** Where a workflow output came from: the workflow's diagram, with this output highlighted, and ways to run or revise it. */
+function WorkflowOrigin({ produced, onRan }: { produced: ProducedBy; onRan: () => void }) {
+  const toast = useToast()
+  const nav = useNavigate()
+  const id = produced.recipe_id
+  // The run that made this dataset holds the exact steps it used, saved workflow or not.
+  const { data: origin, error } = useLoad(() => api.get<Run>(`/api/runs/${produced.run_id}`), [produced.run_id])
+  const { data: saved } = useLoad(() => (id ? api.get<RecipeDetail>(`/api/recipes/${id}`) : Promise.resolve(null)), [id])
+  const [running, setRunning] = useState<{ id: string; title: string } | null>(null)
+  const [starting, setStarting] = useState(false)
+  const recipe = origin?.config.recipe as Recipe | undefined
+  const labels = Object.fromEntries(((origin?.state.inputs as { role: string; label: string }[] | undefined) ?? []).map((i) => [i.role, i.label]))
+  const latest = saved?.version.version
+  const newer = latest && produced.recipe_version && latest > produced.recipe_version
+  const canvas = id ? `/workflows/${id}` : `/workflows/new?fromRun=${produced.run_id}`
+
+  // Rerun on the data it last used: the saved workflow's latest version, or the same steps for an unsaved one.
+  const runAgain = async () => {
+    setStarting(true)
+    try {
+      const def = saved ? saved.version.definition : recipe
+      const last = saved ? saved.last_bindings : (origin?.config.bindings as Record<string, string> | undefined) ?? {}
+      if (!def) return
+      const b: Record<string, string> = {}
+      for (const i of def.inputs) {
+        const v = last[i.role]
+        if (v) b[i.role] = v.startsWith('tpl_') ? bindingId(v) : v   // templates follow their newest file
+      }
+      if (def.inputs.some((i) => !b[i.role])) {
+        toast('Some inputs need data first. Opening the workflow…')
+        nav(canvas)
+        return
+      }
+      const title = saved?.name ?? produced.workflow
+      const run = await api.post<Run>('/api/transform/run', { recipe: def, bindings: b, recipe_id: id ?? undefined, title, background: true })
+      setRunning({ id: run.id, title })
+    } catch (e) { toast((e as Error).message, true) } finally { setStarting(false) }
+  }
+
+  return (
+    <div className="card origin-card">
+      <div className="card-head">
+        <div style={{ minWidth: 0 }}>
+          <div className="origin-kicker">⚙ Made by a workflow</div>
+          <h2 style={{ margin: '2px 0 0' }} className="ellipsis">{produced.workflow}</h2>
+          <div className="muted small">
+            {produced.recipe_version ? `Version ${produced.recipe_version} · ` : id ? '' : 'Not saved as a workflow · '}last run {fmtDate(produced.run_at)} · {produced.rows.toLocaleString()} rows
+            {' · '}<Link to={`/runs/${produced.run_id}`}>run details</Link>
+          </div>
+        </div>
+        <div className="row" style={{ flexWrap: 'nowrap' }}>
+          <button onClick={runAgain} disabled={starting || !recipe} title="Run the workflow again on its latest data; this dataset is updated">
+            {starting ? <Spinner /> : '▶'} Run again
+          </button>
+          <Link className="btn primary" to={canvas} title={id ? 'Open the workflow on the canvas to change or run it' : 'Open these steps on the canvas; save them to keep the workflow'}>Open in canvas →</Link>
+        </div>
+      </div>
+      {error ? <ErrorBox error={error} /> : !origin ? <Loading /> : !recipe ? (
+        <p className="faint small" style={{ margin: 0 }}>The run that made this dataset no longer has its steps, so there is no diagram to show.</p>
+      ) : (
+        <>
+          <WorkflowGraph recipe={recipe} highlight={produced.output_id} inputLabel={(r) => labels[r] ?? r} />
+          {newer && <div className="faint small" style={{ marginTop: 6 }}>The workflow has changed since (now version {latest}). Run it again to update this dataset.</div>}
+          {!id && <div className="faint small" style={{ marginTop: 6 }}>These steps weren’t saved as a workflow. Open them in the canvas and save to reuse them.</div>}
+        </>
+      )}
+      {running && <RunDialog runId={running.id} title={running.title} onClose={() => { setRunning(null); onRan() }}
+        onGoToStep={() => { setRunning(null); nav(canvas) }} />}
+    </div>
   )
 }
 

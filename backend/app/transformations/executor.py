@@ -42,12 +42,16 @@ class StepReport:
         return self.__dict__
 
 
+Tap = tuple[str | None, int]   # (input role or None for the main flow, after step index; -1 = before any step)
+
+
 @dataclass
 class ExecutionResult:
     df: pd.DataFrame
     steps: list[StepReport]
     warnings: list[str]
     branches: dict[str, list[StepReport]] = field(default_factory=dict)
+    taps: dict[Tap, pd.DataFrame] = field(default_factory=dict)   # tables captured part-way, for extra outputs
 
 
 def _require(df: pd.DataFrame, cols: list[str], what: str = "Column") -> None:
@@ -430,11 +434,14 @@ ProgressFn = Callable[[str | None, int, str], None]   # (branch, step index, op)
 
 
 def _run_steps(df: pd.DataFrame, steps: list, tables: dict[str, pd.DataFrame], branch: str | None,
-               stop_after: int | None, on_step: ProgressFn | None = None) -> tuple[pd.DataFrame, list[StepReport], list[str]]:
+               stop_after: int | None, on_step: ProgressFn | None = None,
+               taps: dict[Tap, pd.DataFrame | None] | None = None) -> tuple[pd.DataFrame, list[StepReport], list[str]]:
     reports: list[StepReport] = []
     warnings: list[str] = []
     where = f"Input '{branch}' step" if branch else "Step"
     last = len(steps) if stop_after is None else min(stop_after + 1, len(steps))
+    if taps is not None and (branch, -1) in taps:
+        taps[(branch, -1)] = df
     for i, step in enumerate(steps[:last]):
         if on_step:
             on_step(branch, i, step.op)
@@ -452,30 +459,42 @@ def _run_steps(df: pd.DataFrame, steps: list, tables: dict[str, pd.DataFrame], b
         rep.columns = tabular.schema_of(df)
         reports.append(rep)
         warnings.extend(f"{where} {i + 1} ({step.op}): {w}" for w in rep.warnings)
+        if taps is not None and (branch, i) in taps:
+            taps[(branch, i)] = df
     return df, reports, warnings
 
 
 def execute(recipe: Recipe, tables: dict[str, pd.DataFrame], stop_after: int | None = None,
-            branch_stop: tuple[str, int] | None = None, on_step: ProgressFn | None = None) -> ExecutionResult:
-    """Run input branches, then the main flow.
+            branch_stop: tuple[str, int] | None = None, on_step: ProgressFn | None = None,
+            taps: list[Tap] | None = None) -> ExecutionResult:
+    """Run input branches (each after the inputs it combines), then the main flow.
 
     ``stop_after`` stops the main flow after that step; ``branch_stop=(role, i)`` returns the
-    data of input ``role`` right after its own step ``i`` (and skips the main flow).
+    data of input ``role`` right after its own step ``i`` (and skips the main flow). ``taps``
+    lists points whose table is captured on the way, e.g. for extra outputs.
     """
     if recipe.base not in tables:
         raise StepError(None, f"Base input '{recipe.base}' is not bound to a dataset")
     tables = dict(tables)
+    raw = dict(tables)
     branches: dict[str, list[StepReport]] = {}
     warnings: list[str] = []
-    for inp in recipe.inputs:
-        if not inp.steps or inp.role not in tables:
+    captured: dict[Tap, pd.DataFrame | None] = {t: None for t in taps or []}
+    for role in recipe.branch_order():
+        if role not in tables:
             continue
-        stop = branch_stop[1] if branch_stop and branch_stop[0] == inp.role else None
-        df_b, reps, warns = _run_steps(tables[inp.role].copy(), inp.steps, tables, inp.role, stop, on_step)
-        branches[inp.role] = reps
+        inp = recipe.input(role)
+        stop = branch_stop[1] if branch_stop and branch_stop[0] == role else None
+        df_b, reps, warns = _run_steps(tables[role].copy(), inp.steps, tables, role, stop, on_step, captured)
+        branches[role] = reps
         warnings.extend(warns)
-        if branch_stop and branch_stop[0] == inp.role:
+        if branch_stop and branch_stop[0] == role:
             return ExecutionResult(df=df_b, steps=[], warnings=warnings, branches=branches)
-        tables[inp.role] = df_b
-    df, reports, warns = _run_steps(tables[recipe.base].copy(), recipe.steps, tables, None, stop_after, on_step)
-    return ExecutionResult(df=df, steps=reports, warnings=warnings + warns, branches=branches)
+        tables[role] = df_b
+    # Inputs without their own steps can still be taken as-is.
+    for (role, after) in captured:
+        if role is not None and after == -1 and captured[(role, after)] is None and role in raw:
+            captured[(role, after)] = raw[role]
+    df, reports, warns = _run_steps(tables[recipe.base].copy(), recipe.steps, tables, None, stop_after, on_step, captured)
+    return ExecutionResult(df=df, steps=reports, warnings=warnings + warns, branches=branches,
+                           taps={k: v for k, v in captured.items() if v is not None})

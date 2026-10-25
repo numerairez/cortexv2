@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Cell, ColumnSchema, ColumnValues, Step } from '../types'
+import type { Cell, ColumnSchema, ColumnValues, Selection, Step } from '../types'
+import { JoinVenn, type JoinHow } from './JoinVenn'
 
 type Cols = ColumnSchema[]
 type Rec = Record<string, unknown>
@@ -56,14 +57,15 @@ const SAME_TYPE: Record<string, string> = { integer: 'integer', number: 'number'
 export function newStep(op: string, cols: Cols, roles: string[], base: string): Step {
   const first = cols[0]?.name ?? ''
   const num = cols.slice(1).find((c) => c.type === 'number' || c.type === 'integer')?.name
-  const otherRole = roles.find((r) => r !== base) ?? ''
+  const others = roles.filter((r) => r !== base)
+  const otherRole = others[0] ?? ''
   switch (op) {
     case 'select_columns': return { op, columns: cols.map((c) => c.name) }
     case 'rename_columns': return { op, mapping: { [first]: first } }
     case 'filter_rows': return { op, match: 'all', conditions: [keepAll(cols[0])] }
     case 'sort_rows': return { op, keys: [{ column: first, descending: false }] }
     case 'append_rows': return { op, inputs: otherRole ? [otherRole] : [], allow_missing_columns: true }
-    case 'join': return { op, right: otherRole, left_on: [''], right_on: [''], how: 'left', expected: 'many_to_one' }
+    case 'join': return { op, right: others.length === 1 ? otherRole : '', left_on: [''], right_on: [''], how: 'left', expected: 'many_to_one' }
     case 'deduplicate': return { op, keep: 'first' }
     // Converts the first column to the type it already has, so nothing changes until the user picks one.
     case 'convert_types': return { op, conversions: [{ column: first, to: SAME_TYPE[cols[0]?.type ?? ''] ?? 'text' }], on_error: 'blank' }
@@ -361,10 +363,20 @@ function RangeFilter({ cond, mode, type, info, onChange }: { cond: Rec; mode: st
   )
 }
 
-export function StepEditor({ step, cols, roleCols, roles, base, onChange, columnValues }: {
+/** Datasets a Join can use: inputs already in the workflow (by their dataset name) and the rest of the Library. */
+export interface DatasetChoice {
+  label: (role: string) => string
+  library: Selection[]
+  onPick: (s: Selection) => void
+}
+
+export function StepEditor({ step, cols, roleCols, roles, base, onChange, columnValues, datasets, details }: {
   step: Step; cols: Cols; roleCols: Record<string, Cols>; roles: string[]; base: string; onChange: (s: Step) => void
   /** Loads a column's values as they enter this step, for the filter's pickers. */
   columnValues?: ValuesLoader
+  datasets?: DatasetChoice
+  /** What the last preview reported for this step (e.g. join match counts). */
+  details?: Record<string, unknown>
 }) {
   const a = step as Rec
   const set = (k: string, v: unknown) => onChange({ ...step, [k]: v })
@@ -436,6 +448,7 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange, column
     case 'append_rows':
       return (
         <div className="stack">
+          {!(a.inputs as string[]).length && <div className="drop-tip">⇣ Drag tables from the Library onto this Append box, or tick inputs below.</div>}
           <L label="Stack these inputs below the current table">
             <div className="row">
               {otherRoles.length === 0 && <span className="muted small">Add another input first.</span>}
@@ -455,23 +468,37 @@ export function StepEditor({ step, cols, roleCols, roles, base, onChange, column
       const rcols = roleCols[right] ?? []
       const left = a.left_on as string[]
       const rightOn = a.right_on as string[]
+      const nameOf = (r: string) => datasets?.label(r) ?? r
+      const pick = (v: string) => {
+        if (v.startsWith('lib:')) {
+          const s = datasets?.library.find((x) => x.id === v.slice(4))
+          if (s) datasets!.onPick(s)
+        } else set('right', v)
+      }
       return (
         <div className="stack">
+          {!right && <div className="drop-tip">⇣ Drag a table from the Library onto this Join box, or choose a dataset below.</div>}
+          <L label="Choose dataset">
+            <select value={right} onChange={(e) => pick(e.target.value)}>
+              <option value="">Choose dataset…</option>
+              {otherRoles.length > 0 && (
+                <optgroup label="In this workflow">
+                  {otherRoles.map((r) => <option key={r} value={r}>{nameOf(r)}{nameOf(r) !== r ? ` (${r})` : ''}</option>)}
+                </optgroup>
+              )}
+              {datasets && datasets.library.length > 0 && (
+                <optgroup label="From your Library">
+                  {datasets.library.map((s) => <option key={s.id} value={`lib:${s.id}`}>{s.label}</option>)}
+                </optgroup>
+              )}
+            </select>
+          </L>
+          <div>
+            <span className="label small" style={{ fontWeight: 600 }}>Join type</span>
+            <JoinVenn how={String(a.how) as JoinHow} onChange={(how) => set('how', how)} leftLabel="current table"
+              rightLabel={right ? nameOf(right) : 'the other dataset'} stats={details as { matched?: number }} />
+          </div>
           <div className="subgrid">
-            <L label="Look up in">
-              <select value={right} onChange={(e) => set('right', e.target.value)}>
-                <option value="">Choose input…</option>
-                {otherRoles.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-            </L>
-            <L label="Keep rows">
-              <select value={String(a.how)} onChange={(e) => set('how', e.target.value)}>
-                <option value="left">All current rows (left)</option>
-                <option value="inner">Only matched rows (inner)</option>
-                <option value="outer">All rows from both (outer)</option>
-                <option value="right">All rows from lookup (right)</option>
-              </select>
-            </L>
             <L label="Expected match">
               <select value={String(a.expected)} onChange={(e) => set('expected', e.target.value)}>
                 <option value="many_to_one">Each row finds at most one match</option>

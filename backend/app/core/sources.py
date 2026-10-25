@@ -305,14 +305,60 @@ def get_selection(selection_id: str) -> dict:
 
 
 def list_selections(source_id: str | None = None) -> list[dict]:
-    sql = ("SELECT s.*, src.name AS source_name, src.kind AS source_kind, src.status AS source_status "
+    sql = ("SELECT s.*, src.name AS source_name, src.kind AS source_kind, src.status AS source_status, "
+           "json_extract(src.metadata, '$.produced_by') AS produced_by "
            "FROM selections s JOIN sources src ON src.id = s.source_id "
            "WHERE s.deleted_at IS NULL AND src.deleted_at IS NULL")
     params: list = []
     if source_id:
         sql += " AND s.source_id = ?"
         params.append(source_id)
-    return [_decode_sel(r) for r in db.query(sql + " ORDER BY s.created_at DESC", params)]
+    return [db.decode(_decode_sel(r), "produced_by") for r in db.query(sql + " ORDER BY s.created_at DESC", params)]
+
+
+# ---------------------------------------------------------------- workflow outputs
+
+OUTPUT_SHEET = "Result"
+
+
+def publish_output(key: str, label: str, df, produced_by: dict) -> dict:
+    """Keep a workflow output in the Library: one dataset per workflow output (``key``), whose file is
+    replaced on every run. ``produced_by`` records the workflow and run it came from."""
+    from ..transformations import export
+
+    folder = get_paths().root / "workflow_outputs"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / f"{_safe_key(key)}.xlsx"
+    tmp = path.with_name(path.stem + ".tmp.xlsx")
+    export.write_xlsx(df, tmp, sheet_name=OUTPUT_SHEET)
+    tmp.replace(path)
+    meta, fp = _inspect_file(path, "excel")
+    meta["produced_by"] = produced_by
+    ts = db.now()
+    row = db.query_one("SELECT id FROM sources WHERE location = ? AND deleted_at IS NULL", (str(path),))
+    if row:
+        sid = row["id"]
+        db.execute("UPDATE sources SET name = ?, metadata = ?, fingerprint = ?, status = 'ok', status_detail = ?, "
+                   "updated_at = ? WHERE id = ?",
+                   (f"{label}.xlsx", db.dumps(meta), fp["sha256"], f"Updated by run {produced_by.get('run_id')}", ts, sid))
+        sel = db.query_one("SELECT id FROM selections WHERE source_id = ? AND deleted_at IS NULL ORDER BY created_at LIMIT 1",
+                           (sid,))
+        if sel:
+            # Columns may change with the workflow, so the saved schema follows the latest run.
+            return update_selection(sel["id"], label, None, accept_schema=True)
+    else:
+        sid = db.new_id("src")
+        db.execute(
+            "INSERT INTO sources (id, kind, name, location, metadata, fingerprint, status, created_at, updated_at) "
+            "VALUES (?, 'excel', ?, ?, ?, ?, 'ok', ?, ?)",
+            (sid, f"{label}.xlsx", str(path), db.dumps(meta), fp["sha256"], ts, ts),
+        )
+    return create_selection(sid, kind="sheet", label=label, config={"sheet": OUTPUT_SHEET, "header_row": 1})
+
+
+def _safe_key(key: str) -> str:
+    import re
+    return re.sub(r"[^A-Za-z0-9_-]+", "_", key)[:120] or "output"
 
 
 def _sheet_schema(src: dict, config: dict) -> list[dict]:

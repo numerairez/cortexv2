@@ -46,7 +46,8 @@ export function RunDialog({ runId, title, onClose, onGoToStep }: {
 
   const finished = run && DONE.includes(run.status)
   // Once done, load a preview of the result table.
-  const resultFile = run?.status === 'completed' ? run.artifacts.find((a) => a.kind === 'xlsx') ?? run.artifacts.find((a) => a.kind === 'csv') : undefined
+  const mainFiles = run?.artifacts.filter((a) => (a.metadata.output ?? 'main') === 'main') ?? []
+  const resultFile = run?.status === 'completed' ? mainFiles.find((a) => a.kind === 'xlsx') ?? mainFiles.find((a) => a.kind === 'csv') : undefined
   useEffect(() => {
     if (!resultFile) return
     api.get<typeof table>(`/api/artifacts/${resultFile.id}/view`).then(setTable).catch(() => setTable(null))
@@ -85,7 +86,10 @@ export function RunDialog({ runId, title, onClose, onGoToStep }: {
   const summary = (run?.summary ?? {}) as {
     output_rows?: number; output_columns?: number; warnings?: string[]; failed_step?: number | null; failed_branch?: string | null
     saved_to?: string[]; output_folder?: string | null; save_error?: string | null
+    outputs?: { id: string; name: string; rows: number; columns: number; files: string[]; dataset_id?: string }[]
   }
+  // More than one output: list each with its files and whether it went to the Library.
+  const outputs = summary.outputs ?? []
   const status = run?.status
   const folder = run?.artifacts[0]?.file_path?.replace(/[\\/][^\\/]+$/, '')
 
@@ -145,8 +149,33 @@ export function RunDialog({ runId, title, onClose, onGoToStep }: {
               </div>
             </div>
 
+            {outputs.length > 1 && (
+              <div className="rd-section">
+                <h3 style={{ margin: 0 }}>{outputs.length} outputs</h3>
+                <div className="rd-outputs">
+                  {outputs.map((o) => (
+                    <div key={o.id} className="rd-output">
+                      <div style={{ minWidth: 0, flex: 1 }}>
+                        <b className="ellipsis">{o.name}</b>
+                        <div className="faint small">{o.rows.toLocaleString()} rows × {o.columns} columns{o.id === 'main' ? ' · main result' : ''}</div>
+                      </div>
+                      {o.dataset_id && <span className="badge ok" title="Kept in your Library as a dataset; updated on every run">In your Library</span>}
+                      {run!.artifacts.filter((a) => (a.metadata.output ?? 'main') === o.id && (a.kind === 'xlsx' || a.kind === 'csv')).map((a) => (
+                        <a key={a.id} className="btn sm" href={`/api/artifacts/${a.id}/download`} title={a.name}>
+                          <FileIcon kind={a.kind === 'xlsx' ? 'excel' : 'csv'} size={14} /> {a.kind === 'xlsx' ? 'Excel' : 'CSV'}
+                        </a>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {outputs.length === 1 && outputs[0].dataset_id && (
+              <div className="alert ok small">Added to your Library as <b>{outputs[0].name}</b>. Every run updates it.</div>
+            )}
+
             <div className="rd-section">
-              <h3 style={{ margin: 0 }}>Download</h3>
+              <h3 style={{ margin: 0 }}>{outputs.length > 1 ? 'Download the main result' : 'Download'}</h3>
               <div className="row">
                 <a className="btn primary" href={`/api/runs/${runId}/download/xlsx`}><FileIcon kind="excel" size={18} /> Excel (.xlsx)</a>
                 <a className="btn" href={`/api/runs/${runId}/download/csv`}><FileIcon kind="csv" size={18} /> CSV</a>

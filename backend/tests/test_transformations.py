@@ -159,8 +159,12 @@ def test_branch_errors_and_rules(files):
     with pytest.raises(executor.StepError) as e:
         executor.execute(r, t)
     assert e.value.branch == "feb" and e.value.step_index == 0
-    with pytest.raises(Exception, match="main flow"):
-        Recipe.model_validate({"inputs": [{"role": "a"}, {"role": "b", "steps": [{"op": "append_rows", "inputs": ["a"]}]}], "base": "a"})
+    loop = {"inputs": [{"role": "a"}, {"role": "b", "steps": [{"op": "append_rows", "inputs": ["c"]}]},
+                       {"role": "c", "steps": [{"op": "append_rows", "inputs": ["b"]}]}], "base": "a"}
+    with pytest.raises(Exception, match="loop"):
+        Recipe.model_validate(loop)
+    with pytest.raises(Exception, match="itself"):
+        Recipe.model_validate({"inputs": [{"role": "a"}, {"role": "b", "steps": [{"op": "append_rows", "inputs": ["b"]}]}], "base": "a"})
     with pytest.raises(Exception, match="starting input"):
         Recipe.model_validate({"inputs": [{"role": "a", "steps": [{"op": "sort_rows", "keys": [{"column": "x"}]}]}], "base": "a"})
 
@@ -217,3 +221,34 @@ def test_untouched_steps_pass_data_through(step):
     r = Recipe.model_validate({"inputs": [{"role": "t"}], "base": "t", "steps": [step]})
     res = executor.execute(r, {"t": df})
     assert res.df.equals(df)
+
+
+def test_inputs_merge_before_the_main_flow_and_extra_outputs(files):
+    """Two starting points merge on a side row (listed before the input it needs), then join the main flow;
+    extra outputs are taken part-way through."""
+    t = tables(files)
+    r = Recipe.model_validate({
+        "inputs": [{"role": "sales"},
+                   {"role": "both_months", "steps": [{"op": "append_rows", "inputs": ["feb"]},
+                                                     {"op": "group_aggregate", "group_by": ["Product ID"],
+                                                      "aggregations": [{"column": "Qty", "function": "sum", "as": "Qty"}]}]},
+                   {"role": "feb", "steps": [{"op": "filter_rows", "conditions": [{"column": "Region", "operator": "eq", "value": "Luzon"}]}]},
+                   {"role": "products"}],
+        "base": "products",
+        "steps": [{"op": "join", "right": "both_months", "left_on": ["ID"], "right_on": ["Product ID"], "how": "left",
+                   "expected": "one_to_one"},
+                  {"op": "select_columns", "columns": ["ID", "Qty"]}],
+        "extra_outputs": [{"id": "o1", "name": "monthly", "branch": "both_months", "after": 0},
+                          {"id": "o2", "name": "joined", "after": 0},
+                          {"id": "o3", "name": "raw feb", "branch": "feb", "after": -1}],
+    })
+    t["both_months"] = t["sales"]
+    assert r.branch_order() == ["feb", "both_months"]
+    res = executor.execute(r, t, taps=[(o.branch, o.after) for o in r.extra_outputs])
+    # Jan (5 rows) + the Luzon rows of Feb (1)
+    assert len(res.taps[("both_months", 0)]) == 6
+    assert dict(zip(res.df["ID"], res.df["Qty"])) == {"P1": 12, "P2": 7}
+    assert "Category" in res.taps[(None, 0)].columns and len(res.taps[("feb", -1)]) == 2
+    with pytest.raises(Exception, match="doesn't exist"):
+        Recipe.model_validate({"inputs": [{"role": "a"}], "base": "a",
+                               "extra_outputs": [{"id": "x", "name": "x", "after": 3}]})

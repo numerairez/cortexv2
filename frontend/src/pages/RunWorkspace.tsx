@@ -239,7 +239,9 @@ function TransformationResult({ run }: { run: Run }) {
       )}
       {run.config.recipe !== undefined && (
         <div className="row" style={{ marginTop: 12 }}>
-          <Link className="btn" to={`/workflows/new?fromRun=${run.id}`}>Open this recipe in the builder</Link>
+          <Link className="btn" to={run.recipe_id ? `/workflows/${run.recipe_id}` : `/workflows/new?fromRun=${run.id}`}>
+            {run.recipe_id ? 'Open this workflow' : 'Open this recipe in the builder'}
+          </Link>
         </div>
       )}
     </div>

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
 import { api, qs } from '../api'
-import type { Recipe } from '../types'
+import type { RecipeOutput } from '../types'
 import { FolderPicker } from './FolderPicker'
 import { FileIcon } from './Icons'
 import { Field } from './ui'
 
-type Output = Recipe['output']
+type Output = RecipeOutput
 
 /** Fill {date}/{time} the way the backend does, for the live example. */
 function exampleName(name: string) {
@@ -89,6 +89,10 @@ export function OutputSettings({ output, onChange }: { output: Output; onChange:
           </>
         )}
       </div>
+      <label className="check library-toggle">
+        <input type="checkbox" checked={output.save_to_library !== false} onChange={(e) => set({ save_to_library: e.target.checked })} />
+        <span><b>Add to your Library</b><br /><span className="faint small">Use this table in other workflows. Every run updates it, and it shows which workflow made it.</span></span>
+      </label>
       <p className="faint small" style={{ margin: 0 }}>These settings are saved with the workflow (Save Workflow).</p>
       {picking && <FolderPicker start={output.folder} onClose={() => setPicking(false)} onPick={(path) => { set({ folder: path }); setPicking(false) }} />}
     </div>

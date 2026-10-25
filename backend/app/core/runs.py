@@ -36,6 +36,10 @@ def get_run(run_id: str) -> dict:
     if not row:
         raise SourceError("Run not found", 404)
     row["artifacts"] = list_artifacts(run_id)
+    # The saved workflow this run belongs to, if any, so it can be reopened as that workflow.
+    v = db.query_one("SELECT recipe_id FROM recipe_versions WHERE id = ?", (row["recipe_version_id"],)) \
+        if row.get("recipe_version_id") else None
+    row["recipe_id"] = v["recipe_id"] if v else None
     return row
 
 

@@ -111,6 +111,49 @@ def test_milestone2_transform_save_and_rerun(client, files, tmp_path):
     assert run2["summary"]["output_rows"] == 1  # Feb only has P1
 
 
+def test_outputs_join_the_library_with_their_workflow(client, files):
+    jan = add(client, files["jan"])
+    prod = add(client, files["products"])
+    bindings = {"sales": sheet_selection(client, jan["id"], "Sales", 5, "Jan")["id"],
+                "products": sheet_selection(client, prod["id"], "Products", 1, "Products")["id"]}
+    definition = {
+        "inputs": [{"role": "sales"}, {"role": "products"}],
+        "base": "sales",
+        "steps": [{"op": "join", "right": "products", "left_on": ["Product ID"], "right_on": ["ID"],
+                   "right_columns": ["Category"]},
+                  {"op": "group_aggregate", "group_by": ["Category"],
+                   "aggregations": [{"column": "Qty", "function": "sum", "as": "Qty"}]}],
+        "output": {"name": "result", "formats": ["xlsx"]},
+        "extra_outputs": [{"id": "detail", "name": "Sales detail {date}", "after": 0, "formats": ["csv"]},
+                          {"id": "nolib", "name": "scratch", "after": 0, "save_to_library": False}],
+    }
+    rec = client.post("/api/recipes", json={"name": "Qty by category", "definition": definition}).json()
+    run = client.post("/api/transform/run", json={"recipe": definition, "bindings": bindings, "recipe_id": rec["id"],
+                                                  "title": "Qty by category"}).json()
+    assert run["status"] == "completed", run["errors"]
+    outs = {o["id"]: o for o in run["summary"]["outputs"]}
+    assert set(outs) == {"main", "detail", "nolib"} and outs["detail"]["rows"] == 5 and "dataset_id" not in outs["nolib"]
+    assert {a["metadata"]["output"] for a in run["artifacts"]} == {"main", "detail", "nolib"}
+
+    def from_workflows():
+        return {s["label"]: s for s in client.get("/api/selections").json() if s.get("produced_by")}
+    made = from_workflows()
+    assert set(made) == {"Qty by category", "Sales detail"}
+    pb = made["Sales detail"]["produced_by"]
+    assert pb["workflow"] == "Qty by category" and pb["recipe_id"] == rec["id"] and pb["run_id"] == run["id"]
+    # A workflow output is an ordinary dataset: it can feed another workflow.
+    pv = client.post("/api/transform/preview", json={"recipe": {"inputs": [{"role": "x"}], "base": "x"},
+                                                     "bindings": {"x": made["Qty by category"]["id"]}}).json()
+    assert pv["data"]["row_count"] == 3
+
+    # Rerunning updates the same datasets instead of adding copies.
+    run2 = client.post("/api/transform/run", json={"recipe": definition, "bindings": bindings, "recipe_id": rec["id"],
+                                                   "title": "Qty by category"}).json()
+    again = from_workflows()
+    assert len(again) == 2 and again["Sales detail"]["id"] == made["Sales detail"]["id"]
+    assert again["Sales detail"]["produced_by"]["run_id"] == run2["id"]
+
+
 def test_milestone3_knowledge_base_flow(client, files):
     md = add(client, files["md"])
     txt = add(client, files["txt"])

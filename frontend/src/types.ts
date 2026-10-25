@@ -28,6 +28,8 @@ export interface Source {
     params?: Record<string, unknown>
     rows?: number
     fetched_at?: string
+    /** A dataset a workflow run produced (kept in the Library). */
+    produced_by?: ProducedBy
   }
   fingerprint: string | null
   status: SourceStatus
@@ -75,6 +77,8 @@ export interface Selection {
   source_status?: SourceStatus
   /** Set when this entry is a data template rather than a single sheet selection. */
   template?: DataTemplate
+  /** Set when a workflow run produced this dataset. */
+  produced_by?: ProducedBy | null
 }
 
 export interface SheetPreview {
@@ -227,6 +231,8 @@ export type RunStatus = 'draft' | 'running' | 'awaiting_response' | 'invalid_res
 
 export interface Run {
   id: string
+  /** The saved workflow this run belongs to, if any. */
+  recipe_id?: string | null
   service_id: string
   title: string
   status: RunStatus
@@ -266,8 +272,38 @@ export interface Recipe {
   inputs: { role: string; description?: string; expected_columns?: ColumnSchema[]; steps?: Step[] }[]
   base: string
   steps: Step[]
-  output: { name: string; formats: ('xlsx' | 'csv')[]; folder?: string | null; if_exists?: 'keep_both' | 'replace' }
+  output: RecipeOutput
+  /** Further results taken part-way through the flow (main flow when `branch` is unset). */
+  extra_outputs?: ExtraOutput[]
   groups?: StepGroup[]
+}
+
+export interface RecipeOutput {
+  name: string
+  formats: ('xlsx' | 'csv')[]
+  folder?: string | null
+  if_exists?: 'keep_both' | 'replace'
+  /** Keep the table in the Library as a dataset, refreshed on every run (default on). */
+  save_to_library?: boolean
+}
+
+/** An output taken right after step `after` (-1 = the input as read) of the main flow or of input `branch`. */
+export interface ExtraOutput extends RecipeOutput {
+  id: string
+  branch?: string | null
+  after: number
+}
+
+/** Where a dataset kept in the Library came from, when a workflow run produced it. */
+export interface ProducedBy {
+  workflow: string
+  recipe_id: string | null
+  recipe_version: number | null
+  run_id: string
+  run_at: string
+  output_id: string
+  output_name: string
+  rows: number
 }
 
 /** A named, collapsible run of consecutive main-flow steps (inclusive indices). Never affects results. */

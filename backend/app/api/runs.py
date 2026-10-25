@@ -252,7 +252,9 @@ def download_run_output(run_id: str, fmt: str):
     if fmt not in ("xlsx", "csv"):
         raise SourceError("Format must be xlsx or csv")
     run = runs.get_run(run_id)
-    outputs = [a for a in run["artifacts"] if a["kind"] in ("xlsx", "csv")]
+    # The main result only; extra outputs are downloaded one by one.
+    outputs = [a for a in run["artifacts"] if a["kind"] in ("xlsx", "csv")
+               and (a.get("metadata") or {}).get("output", "main") == "main"]
     if not outputs:
         raise SourceError("This run has no output files", 404)
     existing = next((a for a in reversed(outputs) if a["kind"] == fmt), None)

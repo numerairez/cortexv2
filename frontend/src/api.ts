@@ -8,6 +8,10 @@ export class ApiError extends Error {
   }
 }
 
+/** Fired on window after a change to sources, selections or templates, so open dataset lists can refresh. */
+export const DATASETS_CHANGED = 'flowbook:datasets-changed'
+const notifyDatasets = () => window.dispatchEvent(new Event(DATASETS_CHANGED))
+
 async function request<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
     method,
@@ -29,6 +33,8 @@ async function request<T>(method: string, url: string, body?: unknown): Promise<
     const detail = (data && typeof data === 'object' && 'detail' in data) ? String((data as { detail: unknown }).detail) : res.statusText
     throw new ApiError(detail || `Request failed (${res.status})`, res.status)
   }
+  // Read-only POSTs (sheet profiles, template suggestions/previews) change nothing.
+  if (method !== 'GET' && /^\/api\/(sources|selections|templates)\b/.test(url) && !/\/(profile|suggest|preview)$/.test(url)) notifyDatasets()
   return data as T
 }
 
@@ -54,5 +60,6 @@ export async function uploadFile<T>(file: File): Promise<T> {
   })
   const data = await res.json().catch(() => ({}))
   if (!res.ok) throw new ApiError((data as { detail?: string }).detail ?? `Upload failed (${res.status})`, res.status)
+  notifyDatasets()
   return data as T
 }

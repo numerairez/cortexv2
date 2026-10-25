@@ -263,9 +263,12 @@ function SourceCanvas({ sources, filter, setFilter, producedBy, onOpen, onUpdate
                     <FileIcon kind={s.kind} ext={s.metadata.extension} size={46} />
                     {s.status !== 'ok' && <span className={`file-tile-dot ${s.status}`} title={s.status_detail ?? s.status} />}
                     {tpl && <span className="file-tile-tpl" title={`One of the files the recurring template “${tpl.name}” picks from`}>📅</span>}
+                    {s.metadata.produced_by && <span className="file-tile-wf" title={`Made by the workflow “${s.metadata.produced_by.workflow}”`}>⚙</span>}
                   </span>
                   <span className="file-tile-name">{s.name}</span>
-                  {s.metadata.sheets
+                  {s.metadata.produced_by
+                    ? <span className="small ellipsis lineage" style={{ maxWidth: '100%' }}>From {s.metadata.produced_by.workflow}</span>
+                    : s.metadata.sheets
                     ? <SheetsUsed used={s.sheets_used ?? 0} total={s.metadata.sheets.length} selections={s.selection_count ?? 0} />
                     : <span className="faint small">{fileTypeFor(s.kind, s.metadata.extension)}</span>}
                 </button>

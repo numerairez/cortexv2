@@ -168,16 +168,9 @@ class RecipeInput(BaseModel):
     description: str = ""
     expected_columns: list[ExpectedColumn] = Field(default_factory=list)
     # Branch: preparation steps applied to this input before the main flow joins/appends it.
-    # Lets the same dataset be used twice with different manipulations.
+    # Lets the same dataset be used twice with different manipulations. A branch may itself join or
+    # append other inputs, so several starting points can merge before reaching the main flow.
     steps: list[Step] = Field(default_factory=list, max_length=100)
-
-    @field_validator("steps")
-    @classmethod
-    def _no_combine_in_branch(cls, v):
-        for s in v:
-            if s.op in ("join", "append_rows"):
-                raise ValueError("Join and append belong in the main flow, not in an input's own steps")
-        return v
 
 
 class StepGroup(BaseModel):
@@ -204,6 +197,16 @@ class RecipeOutput(BaseModel):
     # Folder the run also saves its files to (e.g. a team share). None = only the app's run history.
     folder: str | None = Field(default=None, max_length=500)
     if_exists: Literal["keep_both", "replace"] = "keep_both"
+    # Also keep the table in the Library as a dataset (one per workflow output, refreshed on every run).
+    save_to_library: bool = True
+
+
+class ExtraOutput(RecipeOutput):
+    """A further result taken from part-way through the flow: the main flow (``branch`` None) or an
+    input's own row, right after step ``after`` (-1 = the input as read, before its steps)."""
+    id: str = Field(min_length=1, max_length=40, pattern=r"^[A-Za-z0-9_-]+$")
+    branch: str | None = None
+    after: int = Field(default=-1, ge=-1)
 
 
 class Recipe(BaseModel):
@@ -213,6 +216,7 @@ class Recipe(BaseModel):
     base: str
     steps: list[Step] = Field(default_factory=list, max_length=100)
     output: RecipeOutput = Field(default_factory=RecipeOutput)
+    extra_outputs: list[ExtraOutput] = Field(default_factory=list, max_length=20)
     groups: list[StepGroup] = Field(default_factory=list, max_length=50)
 
     @field_validator("base")
@@ -248,8 +252,72 @@ class Recipe(BaseModel):
                 raise ValueError("The main flow's starting input cannot have its own steps; put them in the main flow")
         return self
 
+    @model_validator(mode="after")
+    def _branches_form_no_loop(self):
+        self.branch_order()
+        return self
+
+    @model_validator(mode="after")
+    def _extra_outputs_fit(self):
+        ids = set()
+        for o in self.extra_outputs:
+            if o.id in ids or o.id == "main":
+                raise ValueError(f"Duplicate output id '{o.id}'")
+            ids.add(o.id)
+            if o.branch is not None and o.branch not in self.roles():
+                raise ValueError(f"Output '{o.name}' refers to unknown input '{o.branch}'")
+            steps = self.steps if o.branch is None else self.input(o.branch).steps
+            if o.after >= len(steps):
+                raise ValueError(f"Output '{o.name}' is taken after a step that doesn't exist")
+        return self
+
     def roles(self) -> list[str]:
         return [i.role for i in self.inputs]
+
+    def input(self, role: str) -> RecipeInput:
+        return next(i for i in self.inputs if i.role == role)
+
+    def branch_order(self) -> list[str]:
+        """Inputs with their own steps, ordered so every input runs after the inputs it joins or appends."""
+        roles = set(self.roles())
+        deps: dict[str, set[str]] = {}
+        for i in self.inputs:
+            refs: set[str] = set()
+            for s in i.steps:
+                refs |= set(step_refs(s))
+            unknown = refs - roles
+            if unknown:
+                raise ValueError(f"Input '{i.role}' combines unknown input(s): {', '.join(sorted(unknown))}")
+            if i.role in refs:
+                raise ValueError(f"Input '{i.role}' cannot join or append itself")
+            deps[i.role] = refs
+        order: list[str] = []
+        state: dict[str, int] = {}   # 1 = visiting, 2 = done
+
+        def visit(role: str, path: list[str]) -> None:
+            if state.get(role) == 2:
+                return
+            if state.get(role) == 1:
+                loop = path[path.index(role):] + [role]
+                raise ValueError("These inputs combine each other in a loop: " + " → ".join(loop))
+            state[role] = 1
+            for d in sorted(deps.get(role, ())):
+                visit(d, path + [role])
+            state[role] = 2
+            order.append(role)
+
+        for i in self.inputs:
+            visit(i.role, [])
+        return [r for r in order if self.input(r).steps]
+
+
+def step_refs(step) -> list[str]:
+    """Inputs a step reads besides the table flowing through it."""
+    if step.op == "join":
+        return [step.right] if step.right else []
+    if step.op == "append_rows":
+        return list(step.inputs)
+    return []
 
 
 OPERATION_CATALOG = [

@@ -3,23 +3,94 @@ import type { Source, SourceKind } from '../types'
 import { FileIcon } from './Icons'
 
 // ---------- toasts
+// A toast raised by a button click appears just below that button; anything else (shortcuts, drops,
+// background work, or a button that has since gone away) shows in the bottom-right corner.
 
-type Toast = { id: number; text: string; bad?: boolean }
+type Toast = { id: number; text: string; bad?: boolean; anchor?: HTMLElement }
 const ToastCtx = createContext<(text: string, bad?: boolean) => void>(() => {})
+
+const CLICKABLE = 'button, a, [role="button"], summary, label.check'
+/** How long after a click its toast still belongs to the button (covers slow saves, checks, uploads). */
+const ANCHOR_MS = 20000
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([])
+  const lastClick = useRef<{ el: HTMLElement; at: number } | null>(null)
+  const els = useRef(new Map<number, HTMLDivElement>())
+
+  // Remember the button behind the latest click; any other interaction forgets it.
+  useEffect(() => {
+    const onPointer = (e: PointerEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(CLICKABLE)
+      lastClick.current = el ? { el, at: Date.now() } : null
+    }
+    const onKey = (e: KeyboardEvent) => {
+      const el = (e.target as HTMLElement | null)?.closest<HTMLElement>(CLICKABLE)
+      lastClick.current = el && (e.key === 'Enter' || e.key === ' ') ? { el, at: Date.now() } : null
+    }
+    const forget = () => { lastClick.current = null }
+    document.addEventListener('pointerdown', onPointer, true)
+    document.addEventListener('keydown', onKey, true)
+    document.addEventListener('drop', forget, true)
+    return () => {
+      document.removeEventListener('pointerdown', onPointer, true)
+      document.removeEventListener('keydown', onKey, true)
+      document.removeEventListener('drop', forget, true)
+    }
+  }, [])
+
   const push = useCallback((text: string, bad = false) => {
     const id = Date.now() + Math.random()
-    setToasts((t) => [...t, { id, text, bad }])
+    const c = lastClick.current
+    const anchor = c && Date.now() - c.at < ANCHOR_MS && c.el.isConnected && c.el.getClientRects().length ? c.el : undefined
+    // One message per button: a new one replaces the last.
+    setToasts((t) => [...t.filter((x) => !anchor || x.anchor !== anchor), { id, text, bad, anchor }])
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), bad ? 7000 : 3500)
   }, [])
+
+  // Keep anchored toasts under their buttons while things scroll or resize; if the button goes
+  // away (a dialog closed, the page changed) the toast moves to the corner.
+  const anchored = toasts.some((t) => t.anchor)
+  useEffect(() => {
+    if (!anchored) return
+    let frame = 0
+    const place = () => {
+      const gone: number[] = []
+      for (const t of toasts) {
+        const box = t.anchor && els.current.get(t.id)
+        if (!t.anchor || !box) continue
+        if (!t.anchor.isConnected || !t.anchor.getClientRects().length) { gone.push(t.id); continue }
+        const r = t.anchor.getBoundingClientRect()
+        const w = box.offsetWidth
+        const h = box.offsetHeight
+        const below = r.bottom + 8 + h <= window.innerHeight - 8
+        const center = r.left + r.width / 2
+        const left = Math.max(8, Math.min(center - w / 2, window.innerWidth - w - 8))
+        box.style.left = `${left}px`
+        box.style.top = `${below ? r.bottom + 8 : r.top - 8 - h}px`
+        box.style.setProperty('--arrow-x', `${Math.max(12, Math.min(center - left, w - 12))}px`)
+        box.classList.toggle('above', !below)
+        box.classList.add('placed')
+      }
+      if (gone.length) setToasts((ts) => ts.map((x) => (gone.includes(x.id) ? { ...x, anchor: undefined } : x)))
+      else frame = requestAnimationFrame(place)
+    }
+    place()
+    return () => cancelAnimationFrame(frame)
+  }, [anchored, toasts])
+
+  const ref = (id: number) => (el: HTMLDivElement | null) => { if (el) els.current.set(id, el); else els.current.delete(id) }
   return (
     <ToastCtx.Provider value={push}>
       {children}
       <div className="toast-host" role="status" aria-live="polite">
-        {toasts.map((t) => (
+        {toasts.filter((t) => !t.anchor).map((t) => (
           <div key={t.id} className={`toast${t.bad ? ' bad' : ''}`}>{t.text}</div>
+        ))}
+      </div>
+      <div role="status" aria-live="polite">
+        {toasts.filter((t) => t.anchor).map((t) => (
+          <div key={t.id} ref={ref(t.id)} className={`toast anchored${t.bad ? ' bad' : ''}`}>{t.text}</div>
         ))}
       </div>
     </ToastCtx.Provider>

@@ -1,7 +1,7 @@
 // Datasets a workflow input can use: single sheet selections and data templates.
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { api } from './api'
-import type { DataTemplate, Selection } from './types'
+import { DATASETS_CHANGED, api } from './api'
+import type { DataTemplate, Selection, Source } from './types'
 
 const extOf = (name: string) => name.match(/\.[a-z0-9]+$/i)?.[0]?.toLowerCase() ?? ''
 
@@ -30,7 +30,30 @@ export function useDatasets() {
     setList([...tpls.map(templateAsDataset), ...sels.filter((s) => s.kind === 'sheet')])
   }, [])
   useEffect(() => { reload() }, [reload])
+  useRefreshOnChange(reload)
   const add = useCallback((s: Selection) => setList((l) => (l && !l.some((x) => x.id === s.id) ? [s, ...l] : l)), [])
   const byId = useMemo(() => Object.fromEntries((list ?? []).map((s) => [s.id, s])), [list])
   return { datasets: list, byId, reload, add }
+}
+
+/** Reload when data is added elsewhere: another page or pop-up in this app, or another browser tab. */
+function useRefreshOnChange(reload: () => Promise<void>) {
+  useEffect(() => {
+    const refresh = () => { reload().catch(() => undefined) }
+    window.addEventListener(DATASETS_CHANGED, refresh)
+    window.addEventListener('focus', refresh)
+    return () => { window.removeEventListener(DATASETS_CHANGED, refresh); window.removeEventListener('focus', refresh) }
+  }, [reload])
+}
+
+/** Spreadsheet files added but not set up yet (no sheet saved), so not usable as a dataset until one is. */
+export function useUnpreparedFiles() {
+  const [list, setList] = useState<Source[]>([])
+  const reload = useCallback(async () => {
+    const all = await api.get<Source[]>('/api/sources')
+    setList(all.filter((s) => (s.kind === 'excel' || s.kind === 'csv') && !s.selection_count))
+  }, [])
+  useEffect(() => { reload().catch(() => undefined) }, [reload])
+  useRefreshOnChange(reload)
+  return list
 }
