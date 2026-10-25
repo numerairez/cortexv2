@@ -41,7 +41,7 @@ Requirements: Python 3.10+ (3.11+ uses the pinned lock file). No administrator r
 | Knowledge Base service: anchored source prompts, untrusted-content delimiting, JSON contract, citation validation, corrective follow-up prompt, Markdown/HTML/JSON outputs | ✅ |
 | Runs: append-only history, snapshots/provenance, prompt/reply history (retention toggle), artifacts | ✅ |
 | Confluence (Data Center/Server REST, session-only personal access token) | ⚠️ Implemented, untested against the real intranet (Milestone 0 spike) |
-| Dashboard Builder | ⏳ Milestone 4 |
+| **Dashboards** (Vega-Lite): headlines, charts and tables (rows, summary or **pivot** with totals) on one library dataset, started from a gallery of **layout templates** filled from the dataset's own columns (some with interactions pre-wired), each with its own filter (same conditions as a workflow Filter step) and a caption naming its data source, row count and active filters, suggested starting layout, drag/resize grid editor, field drag-and-drop; static by default, with an **Interactions** wireframe mode to link objects so a click filters or highlights others; **describe interactions in words** (chatbot proposes filter/highlight links, previewed on the wireframe as a diff before applying); **describe an object in words** inside its wireframe → copy a prompt for the approved chatbot → paste the reply, validated against the dataset's columns (builder settings or Vega-Lite); optional hand-written Vega-Lite per chart (no external data or links) | ✅ |
 
 ## Development
 

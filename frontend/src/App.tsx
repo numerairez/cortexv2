@@ -2,6 +2,8 @@ import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import About from './pages/About'
 import CollectionEditor from './pages/CollectionEditor'
 import Contexts from './pages/Contexts'
+import DashboardEditor from './pages/DashboardEditor'
+import Dashboards from './pages/Dashboards'
 import Library from './pages/Library'
 import MacroImport from './pages/MacroImport'
 import RunWorkspace from './pages/RunWorkspace'
@@ -18,6 +20,7 @@ const I = {
   workflows: <><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 12h4l5-6M11.5 12l5 6" /></>,
   sources: <><ellipse cx="12" cy="5.5" rx="8" ry="3" /><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6" /></>,
   contexts: <><rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="3" width="8" height="8" rx="1.5" /><rect x="3" y="13" width="8" height="8" rx="1.5" /><path d="M17 14v6M14 17h6" /></>,
+  dashboards: <><rect x="3" y="3" width="8" height="5" rx="1.5" /><rect x="13" y="3" width="8" height="5" rx="1.5" /><rect x="3" y="10" width="18" height="11" rx="1.5" /><path d="M7 17v-2M11 17v-4M15 17v-3" /></>,
   services: <path d="M13 2 4 14h7l-1 8 9-12h-7z" />,
   about: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7.5v.01" /></>,
   runs: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
@@ -31,6 +34,7 @@ function Icon({ d }: { d: React.ReactNode }) {
 
 const NAV: { to: string; label: string; icon: React.ReactNode; end?: boolean; section?: string }[] = [
   { to: '/', label: 'Workflows', icon: I.workflows, end: true },
+  { to: '/dashboards', label: 'Dashboards', icon: I.dashboards },
   { to: '/sources', label: 'My data', icon: I.sources },
   { to: '/runs', label: 'History', icon: I.runs },
   { to: '/library', label: 'Output files', icon: I.library },
@@ -74,6 +78,8 @@ export default function App() {
           <Route path="/workflows/from-macro" element={<MacroImport />} />
           <Route path="/workflows/from-python" element={<MacroImport key="python" language="python" />} />
           <Route path="/workflows/:id" element={<Studio />} />
+          <Route path="/dashboards" element={<Dashboards />} />
+          <Route path="/dashboards/:id" element={<DashboardEditor />} />
           <Route path="/sources" element={<Sources />} />
           <Route path="/sources/:id" element={<SourceDetail />} />
           <Route path="/contexts" element={<Contexts />} />

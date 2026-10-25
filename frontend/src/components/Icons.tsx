@@ -125,3 +125,13 @@ export function TypeGlyph({ type }: { type: string }) {
   const g: Record<string, ReactNode> = { text: 'Abc', integer: '#', number: '#.#', date: CALENDAR, boolean: '✓✗', empty: '∅' }
   return <span className={`type-glyph t-${type}`} title={type}>{g[type] ?? type}</span>
 }
+
+/** "Ask AI": a large sparkle with a small one beside it (asymmetric, so it never reads as a plus sign). */
+export function SparkIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg viewBox="0 0 16 16" width={size} height={size} fill="currentColor" aria-hidden className="spark-icon">
+      <path d="M6.5 1.5c.45 3.1 1.9 4.55 5 5-3.1.45-4.55 1.9-5 5-.45-3.1-1.9-4.55-5-5 3.1-.45 4.55-1.9 5-5z" />
+      <path d="M12.6 9.6c.2 1.4.85 2.05 2.25 2.25-1.4.2-2.05.85-2.25 2.25-.2-1.4-.85-2.05-2.25-2.25 1.4-.2 2.05-.85 2.25-2.25z" />
+    </svg>
+  )
+}

@@ -12,6 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from .api import dashboards as dashboards_api
 from .api import runs as runs_api
 from .api import sources as sources_api
 from .api import system as system_api
@@ -85,6 +86,7 @@ def create_app(allowed_ports: set[int] | None = None) -> FastAPI:
     app.include_router(system_api.router)
     app.include_router(sources_api.router)
     app.include_router(runs_api.router)
+    app.include_router(dashboards_api.router)
 
     if FRONTEND_DIST.is_dir():
         app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="assets")

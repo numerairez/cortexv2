@@ -131,6 +131,19 @@ MIGRATIONS: list[str] = [
         deleted_at TEXT
     );
     """,
+    # 3 — dashboards built on one library dataset (spec = widgets, layout and interaction links)
+    """
+    CREATE TABLE dashboards (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        dataset TEXT NOT NULL,           -- selection id or data template binding
+        spec TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+    );
+    """,
 ]
 
 

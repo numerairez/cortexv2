@@ -244,6 +244,7 @@ function SelectionRow({ sel, source, onEdit, onChanged }: { sel: Selection; sour
         )}
       </div>
       {sel.kind === 'sheet' && <button className="sm" onClick={makeTemplate} title="Use this file as a template for its monthly/daily siblings">📅 Make template</button>}
+      {sel.kind === 'sheet' && <button className="sm" onClick={() => nav(`/dashboards?dataset=${sel.id}`)} title="Build a dashboard from this data">📊 Dashboard</button>}
       {sel.kind === 'sheet' && <button className="sm" onClick={runCheck} disabled={busy}>{busy ? <Spinner /> : 'Check'}</button>}
       {offer && (
         <Modal title="Data template" wide onClose={() => setOffer(null)}>

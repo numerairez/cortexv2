@@ -27,7 +27,7 @@ export function keepAll(col?: ColumnSchema): Rec {
 }
 
 /** What a filter condition keeps, without the column name: "all values", "not A/B", "10–20", … */
-function describeCondition(c: Rec): string {
+export function describeCondition(c: Rec): string {
   const op = String(c.operator)
   const list = Array.isArray(c.value) ? (c.value as Cell[]) : []
   const shown = (v: unknown) => (v === null || v === undefined ? '(blank)' : String(v))
@@ -153,7 +153,7 @@ function Tabs({ tabs, value, onChange }: { tabs: [string, string][]; value: stri
 }
 
 /** One filter condition, laid out like Tableau's filter dialog: pick values from a list, or a range for numbers and dates. */
-function FilterCondition({ cond, cols, load, defaultOpen, onChange, onRemove }: {
+export function FilterCondition({ cond, cols, load, defaultOpen, onChange, onRemove }: {
   cond: Rec; cols: Cols; load?: ValuesLoader; defaultOpen?: boolean; onChange: (patch: Rec) => void; onRemove: () => void
 }) {
   const [open, setOpen] = useState(!!defaultOpen)
