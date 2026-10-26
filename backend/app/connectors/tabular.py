@@ -1,9 +1,14 @@
 """Excel/CSV reading: sheet listing, physical-row previews, header detection, profiling.
 
 Row numbers exposed to users are always 1-based physical worksheet rows, exactly as
-Excel shows them. We read rows through openpyxl/csv directly instead of
+Excel shows them. We read rows through calamine/openpyxl/csv directly instead of
 ``pandas.read_excel(header=...)`` because pandas may drop leading blank rows, which
 would silently shift a user's "header is on row 5" choice.
+
+Workbooks are read with python-calamine when it is installed (about 8x faster than
+openpyxl on large sheets), its values converted to what openpyxl gives. Calamine reads
+error cells (#N/A, #DIV/0!) as blanks, so a sheet that contains any is read with
+openpyxl instead, which keeps the error text visible.
 """
 
 from __future__ import annotations
@@ -11,6 +16,8 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -42,9 +49,84 @@ def _open_workbook(path: Path):
         raise TabularError(f"Could not open workbook: {e.__class__.__name__}: {e}") from e
 
 
+def _calamine(path: Path):
+    """The workbook opened with python-calamine, or None to read it with openpyxl instead
+    (not installed, or a file calamine can't read that openpyxl might)."""
+    try:
+        from python_calamine import CalamineWorkbook
+    except ImportError:
+        return None
+    try:
+        return CalamineWorkbook.from_path(str(path))
+    except Exception:
+        return None
+
+
+_NS_MAIN = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
+_NS_REL = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+_NS_PKG = "{http://schemas.openxmlformats.org/package/2006/relationships}"
+
+
+def _sheet_has_errors(path: Path, sheet: str) -> bool:
+    """Whether the sheet holds any error cell (t="e"). Unsure counts as yes."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            rid = next((s.get(f"{_NS_REL}id") for s in ET.fromstring(z.read("xl/workbook.xml")).iter(f"{_NS_MAIN}sheet")
+                        if s.get("name") == sheet), None)
+            target = next((r.get("Target") for r in ET.fromstring(z.read("xl/_rels/workbook.xml.rels")).iter(f"{_NS_PKG}Relationship")
+                           if r.get("Id") == rid), None)
+            if not target:
+                return True
+            part = target.lstrip("/") if target.startswith("/") else f"xl/{target}"
+            with z.open(part) as f:
+                tail = b""
+                while chunk := f.read(1 << 20):
+                    window = tail + chunk
+                    if b't="e"' in window or b"t='e'" in window:
+                        return True
+                    tail = chunk[-6:]
+    except (KeyError, OSError, zipfile.BadZipFile, ET.ParseError):
+        return True
+    return False
+
+
+def _clean_calamine_cell(v: Any) -> Any:
+    """``_clean_cell`` of the value openpyxl would report: whole numbers as int (Excel stores
+    3 as "3", which openpyxl reads as an int) and dates as datetimes. Runs once per cell, so
+    it dispatches on the exact type."""
+    t = type(v)
+    if t is str:
+        v = v.strip()
+        return v if v != "" else None
+    if t is float:
+        return int(v) if v.is_integer() else v
+    if t is dt.date:
+        return dt.datetime(v.year, v.month, v.day)
+    return v
+
+
+def _calamine_rows(path: Path, sheet: str, start_row: int, max_rows: int | None) -> list[list] | None:
+    """Physical rows from ``start_row`` read with calamine, or None to read with openpyxl."""
+    wb = _calamine(path)
+    if wb is None or sheet not in wb.sheet_names or _sheet_has_errors(path, sheet):
+        return None
+    try:
+        rows = wb.get_sheet_by_name(sheet).to_python(
+            skip_empty_area=False, nrows=start_row + max_rows - 1 if max_rows else None)
+    except Exception:
+        return None
+    return rows[start_row - 1:]
+
+
 def list_sheets(path: Path) -> list[str]:
     ext = path.suffix.lower()
     if ext in EXCEL_EXTS:
+        cwb = _calamine(path)
+        if cwb is not None:
+            from python_calamine import SheetTypeEnum
+
+            # Worksheets only, hidden ones included, as openpyxl's wb.worksheets lists them.
+            return [m.name for m in cwb.sheets_metadata if m.typ == SheetTypeEnum.WorkSheet]
         wb = _open_workbook(path)
         try:
             return [ws.title for ws in wb.worksheets]
@@ -80,6 +162,11 @@ def iter_physical_rows(path: Path, sheet: str, start_row: int = 1, max_rows: int
     """Yield (excel_row_number, [values]) starting at ``start_row`` (1-based)."""
     ext = path.suffix.lower()
     if ext in EXCEL_EXTS:
+        fast = _calamine_rows(path, sheet, start_row, max_rows)
+        if fast is not None:
+            for i, row in enumerate(fast):
+                yield start_row + i, [_clean_calamine_cell(v) for v in row]
+            return
         wb = _open_workbook(path)
         try:
             if sheet not in wb.sheetnames:

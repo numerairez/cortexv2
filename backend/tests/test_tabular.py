@@ -71,3 +71,65 @@ def test_column_values_match_per_value_conversion():
         expected = [None if isinstance(v, float) and math.isinf(v) else v for v in expected]
         assert tabular.column_values(df[col]) == expected, col
     assert tabular.column_values(df["n"], limit=1) == [1]
+
+
+def _openpyxl_only(monkeypatch):
+    monkeypatch.setattr(tabular, "_calamine", lambda path: None)
+
+
+def _awkward_workbook(path):
+    """Leading blank rows and columns, whole and fractional numbers, dates with and without a time,
+    times, booleans, padded and blank text, a hidden sheet."""
+    import datetime as dt
+
+    from .conftest import _write_xlsx
+
+    return _write_xlsx(path, [
+        [None], [None, None, "Title"], [None],
+        [None, "ID", "Amount", "When", "At", "Flag", "Note", "Big"],
+        [None, 2, 1.5, dt.datetime(2026, 1, 3), dt.time(9, 15), True, " padded ", 10**15],
+        [None, "P3", 3.0, dt.datetime(2026, 1, 3, 10, 30), None, False, "", -7],
+        [None, None, None, None, None, None, None, None],
+        [None, 4, 0.1, None, dt.time(0, 0), None, "=not a formula", 0],
+    ], sheet="Data", extra_sheets={"Hidden": [["x"]]})
+
+
+def test_calamine_reads_exactly_what_openpyxl_reads(files, tmp_path, monkeypatch):
+    books = [(files["jan"], "Sales", 5), (files["jan"], "Notes", 1), (files["feb"], "Sales", 5),
+             (files["products"], "Products", 1), (_awkward_workbook(tmp_path / "awkward.xlsx"), "Data", 4)]
+    for path, sheet, header in books:
+        assert tabular._calamine(path) is not None
+        fast_sheets = tabular.list_sheets(path)
+        fast_rows = list(tabular.iter_physical_rows(path, sheet))
+        fast_preview = list(tabular.iter_physical_rows(path, sheet, start_row=2, max_rows=3))
+        fast_table = tabular.load_table(path, sheet, header)
+        with monkeypatch.context() as m:
+            _openpyxl_only(m)
+            assert tabular.list_sheets(path) == fast_sheets
+            slow_rows = list(tabular.iter_physical_rows(path, sheet))
+            # openpyxl pads every row to the sheet's width; compare without trailing blanks.
+            assert [(n, tabular._trim(r)) for n, r in fast_rows] == [(n, tabular._trim(r)) for n, r in slow_rows], path.name
+            assert [(n, tabular._trim(r)) for n, r in fast_preview] == \
+                [(n, tabular._trim(r)) for n, r in tabular.iter_physical_rows(path, sheet, start_row=2, max_rows=3)]
+            slow_table = tabular.load_table(path, sheet, header)
+        assert fast_table.df.equals(slow_table.df) and list(fast_table.df.dtypes) == list(slow_table.df.dtypes), path.name
+        assert fast_table.warnings == slow_table.warnings and fast_table.letters == slow_table.letters
+
+
+def test_sheet_with_error_cells_is_read_with_openpyxl(tmp_path, monkeypatch):
+    import re
+    import zipfile
+
+    plain = _awkward_workbook(tmp_path / "plain.xlsx")
+    broken = tmp_path / "errors.xlsx"
+    with zipfile.ZipFile(plain) as src, zipfile.ZipFile(broken, "w") as out:
+        for item in src.infolist():
+            data = src.read(item.filename)
+            if item.filename == "xl/worksheets/sheet1.xml":   # a cached #N/A where C5 (1.5) was
+                data = re.sub(rb'<c r="C5"[^>]*>.*?</c>', b'<c r="C5" t="e"><f>NA()</f><v>#N/A</v></c>', data)
+            out.writestr(item, data)
+
+    assert not tabular._sheet_has_errors(plain, "Data") and not tabular._sheet_has_errors(broken, "Hidden")
+    assert tabular._sheet_has_errors(broken, "Data")
+    rows = dict(tabular.iter_physical_rows(broken, "Data"))
+    assert rows[5][2] == "#N/A"   # kept visible, not read as a blank
