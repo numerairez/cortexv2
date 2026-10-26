@@ -58,6 +58,10 @@ class Paths:
         return self.root / "artifacts"
 
     @property
+    def table_cache(self) -> Path:
+        return self.root / "cache" / "tables"
+
+    @property
     def logs(self) -> Path:
         return self.root / "logs"
 

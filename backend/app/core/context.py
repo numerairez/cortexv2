@@ -15,7 +15,7 @@ import pandas as pd
 
 from ..connectors import confluence, documents, tabular
 from ..storage import db
-from . import sources
+from . import sources, table_cache
 from .sources import SourceError
 
 SHEET_ROWS_PER_SEGMENT = 40
@@ -83,7 +83,7 @@ def resolve_selection(selection_id: str, ref: str, as_text: bool = True) -> Reso
             item.link = _file_link(src["location"])
             if sel["kind"] == "sheet":
                 cfg = sel["config"]
-                t = tabular.load_table(path, cfg["sheet"], int(cfg.get("header_row") or 1), cfg.get("columns") or None)
+                t = table_cache.load_table(path, cfg["sheet"], int(cfg.get("header_row") or 1), cfg.get("columns") or None, fp["sha256"])
                 item.table = t.df
                 item.header_row = t.header_row
                 item.warnings.extend(t.warnings)

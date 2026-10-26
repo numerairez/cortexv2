@@ -1,8 +1,10 @@
 // Turns a dashboard chart into a Vega-Lite spec: the chart itself, a selection when other
 // objects listen to it, and a dimmed "whole vs highlighted part" overlay when it is highlighted.
 import { canHighlight, isCategory, isNumeric, measureLabel, type ChartWidget, type ColType, type Measure, type Sel } from '../../dashboard'
+import { PART, RANK, VALUE, preAggregated } from './chartData'
 
-/** Data the chart is fed at run time (rows are pushed in by name, never inlined). */
+/** Data the chart is fed at run time (rows are pushed in by name, never inlined). Built charts other than
+ *  scatter plots are fed totals from `chartData`, so their encodings read the value instead of aggregating. */
 export const DATA_NAME = 'table'
 /** Selection parameter name; a hand-written spec can declare one with this name to drive other objects. */
 export const SEL = 'sel'
@@ -100,9 +102,10 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
   const transform: Spec[] = []
   const colorEnc: Spec | undefined = w.color ? { field: fieldRef(w.color), type: 'nominal', title: w.color, scale: { range: palette } } : undefined
   const tooltip: Spec[] = []
+  const pre = preAggregated(w)
 
-  // Top N categories by value, before anything is drawn.
-  if (w.top && w.x && !(xt === 'date' || isNumeric(xt)) && w.chart !== 'scatter') {
+  // Top N categories by value, before anything is drawn (totals arrive already cut to the top N).
+  if (!pre && w.top && w.x && !(xt === 'date' || isNumeric(xt)) && w.chart !== 'scatter') {
     const op = w.y.agg === 'count' ? { op: 'count' } : { op: w.y.agg, field: fieldRef(w.y.field!) }
     transform.push(
       { joinaggregate: [{ ...op, as: '__v' }], groupby: [fieldRef(w.x)] },
@@ -113,7 +116,9 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
 
   let mark: Spec
   const enc: Spec = {}
-  const value = measureEnc(w.y, { format: ',.2~f' })
+  const value = pre
+    ? { field: VALUE, type: 'quantitative', title: measureLabel(w.y), format: ',.2~f' }
+    : measureEnc(w.y, { format: ',.2~f' })
   switch (w.chart) {
     case 'bar':
     case 'hbar': {
@@ -122,12 +127,13 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
       if (w.x) {
         enc[cat] = dimEnc(w.x, xt, w)
         if (enc[cat].type === 'nominal' || enc[cat].type === 'ordinal') {
-          enc[cat].sort = w.sort === 'label' ? 'ascending' : `-${val}`
+          enc[cat].sort = w.sort === 'label' ? 'ascending' : pre ? { field: RANK, op: 'max', order: 'descending' } : `-${val}`
           // Tilt category labels only when they no longer fit side by side.
           if (!horizontal) enc[cat].axis = { ...enc[cat].axis, labelAngle: { expr: "width / max(1, length(domain('x'))) < 64 ? -35 : 0" }, labelOverlap: true }
         }
       }
-      enc[val] = value
+      // One total per bar unless split into series: nothing to stack.
+      enc[val] = colorEnc ? value : { ...value, stack: null }
       if (colorEnc) enc.color = colorEnc
       else enc.color = { value: palette[0] }
       mark = { type: 'bar', cornerRadiusEnd: 4, ...(colorEnc ? { stroke: surface, strokeWidth: 1 } : {}) }
@@ -153,7 +159,7 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
     case 'donut': {
       enc.theta = { ...value, stack: true }
       if (w.x) enc.color = { field: fieldRef(w.x), type: 'nominal', title: w.x, scale: { range: palette }, legend: { orient: 'right' } }
-      enc.order = { ...measureEnc(w.y), sort: 'descending' }
+      enc.order = { field: VALUE, type: 'quantitative', sort: 'descending' }
       mark = { type: 'arc', innerRadius: { expr: 'min(width, height) * 0.26' }, outerRadius: { expr: 'min(width, height) * 0.46' }, stroke: surface, strokeWidth: 2 }
       break
     }
@@ -170,7 +176,8 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
     const e = enc[ch]
     if (e?.field || e?.aggregate) tooltip.push({ field: e.field, aggregate: e.aggregate, type: e.type, timeUnit: e.timeUnit, title: e.title, format: e.type === 'quantitative' ? ',.2~f' : undefined })
   }
-  enc.tooltip = [...tooltip.filter((t) => !t.aggregate), ...tooltip.filter((t) => t.aggregate)]
+  const isValue = (t: Spec) => t.aggregate || t.field === VALUE
+  enc.tooltip = [...tooltip.filter((t) => !isValue(t)), ...tooltip.filter(isValue)]
     .map((t) => Object.fromEntries(Object.entries(t).filter(([, v]) => v !== undefined)))
 
   const params = select ? [selectionParam(select, w)] : []
@@ -182,15 +189,22 @@ export function buildSpec(w: ChartWidget, ctx: BuildContext): { spec: Spec; sele
     return { spec: { ...base, params, mark, encoding: { ...enc, ...pointFeedback } }, select }
   }
 
-  // Highlighted: the whole in a muted colour, the highlighted part on top in full colour.
+  // Highlighted: the whole in a muted colour, the highlighted part on top in full colour. Totals come as
+  // two sets of rows, the whole's and the part's; a scatter's points are each flagged as in the part or not.
   const { color: _c, tooltip: _t, ...shape } = enc
-  const whole: Spec = { mark: { ...mark, ...(mark.type === 'area' ? { fillOpacity: 0.5 } : {}) }, encoding: { ...shape, color: { value: dim } } }
+  const wholeRows = pre ? [{ filter: `!datum.${PART}` }] : []
+  const whole: Spec = { transform: wholeRows, mark: { ...mark, ...(mark.type === 'area' ? { fillOpacity: 0.5 } : {}) }, encoding: { ...shape, color: { value: dim } } }
   if (w.color && (w.chart === 'line' || w.chart === 'area')) whole.encoding.detail = { field: fieldRef(w.color) }
-  const part: Spec = { transform: [{ filter: 'datum.__hl' }], mark, encoding: { ...enc, ...pointFeedback } }
+  // The whole of a split bar chart is one grey bar per category (its totals come unsplit).
+  if (pre && (w.chart === 'bar' || w.chart === 'hbar')) {
+    const ch = w.chart === 'hbar' ? 'x' : 'y'
+    whole.encoding[ch] = { ...whole.encoding[ch], stack: null }
+  }
+  const part: Spec = { transform: [{ filter: `datum.${PART}` }], mark, encoding: { ...enc, ...pointFeedback } }
   const layer = [whole, part]
   if (select?.kind === 'point') {
     // Clicks land on a transparent copy of the whole, so the highlighted part on top doesn't swallow them.
-    layer.push({ params, mark: { type: mark.type, fill: 'transparent', stroke: null, cursor: 'pointer' }, encoding: { ...shape, tooltip: enc.tooltip } })
+    layer.push({ transform: wholeRows, params, mark: { type: mark.type, fill: 'transparent', stroke: null, cursor: 'pointer' }, encoding: { ...shape, tooltip: enc.tooltip } })
   } else if (select) {
     whole.params = params
     whole.mark.cursor = 'crosshair'

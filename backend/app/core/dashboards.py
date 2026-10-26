@@ -19,7 +19,7 @@ from .sources import SourceError
 
 GRID_COLUMNS = 12
 MAX_WIDGETS = 60
-MAX_ROWS = 100_000
+MAX_ROWS = 500_000
 
 Agg = Literal["count", "sum", "mean", "median", "min", "max", "distinct"]
 
@@ -202,7 +202,9 @@ def delete_dashboard(dashboard_id: str) -> None:
 # ---------------------------------------------------------------- data
 
 def dataset_rows(binding: str, limit: int = MAX_ROWS) -> dict:
-    """The dataset's rows for the browser to aggregate and chart, with its column types."""
+    """The dataset's rows for the browser to aggregate and chart, with its column types.
+    Sent column by column (``values[i]`` is every value of ``columns[i]``): far smaller and
+    faster to build than one list per row."""
     from ..services.transformation import load_bindings
 
     tables, info = load_bindings({"data": binding})
@@ -213,7 +215,7 @@ def dataset_rows(binding: str, limit: int = MAX_ROWS) -> dict:
         "sheet": info[0]["sheet"],
         "read_at": db.now(),
         "columns": tabular.schema_of(df),
-        "rows": tabular.records(df, limit),
+        "values": [tabular.column_values(df[c], limit) for c in df.columns],
         "row_count": int(len(df)),
         "truncated": len(df) > limit,
         "warnings": info[0]["warnings"],

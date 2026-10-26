@@ -70,7 +70,8 @@ export interface Dashboard {
 export type ColType = ColumnSchema['type']
 export type Row = Record<string, unknown>
 export interface DashData {
-  label: string; columns: ColumnSchema[]; rows: Cell[][]; row_count: number; truncated: boolean; warnings: string[]
+  /** One array per column, in the order of `columns`. */
+  label: string; columns: ColumnSchema[]; values: Cell[][]; row_count: number; truncated: boolean; warnings: string[]
   /** The file the rows were read from, its sheet, and when. */
   file?: string; sheet?: string; read_at?: string
 }
@@ -84,11 +85,17 @@ export const newId = (prefix: string) => `${prefix}${Math.random().toString(36).
 export function toRows(d: DashData): Row[] {
   const names = d.columns.map((c) => c.name)
   const dates = d.columns.map((c) => c.type === 'date')
-  return d.rows.map((r) => {
+  const n = d.values[0]?.length ?? 0
+  const out: Row[] = new Array(n)
+  for (let j = 0; j < n; j++) {
     const o: Row = {}
-    for (let i = 0; i < names.length; i++) o[names[i]] = dates[i] && r[i] != null ? new Date(String(r[i])) : r[i]
-    return o
-  })
+    for (let i = 0; i < names.length; i++) {
+      const v = d.values[i][j]
+      o[names[i]] = dates[i] && v != null ? new Date(String(v)) : v
+    }
+    out[j] = o
+  }
+  return out
 }
 
 export const isNumeric = (t?: ColType) => t === 'integer' || t === 'number'

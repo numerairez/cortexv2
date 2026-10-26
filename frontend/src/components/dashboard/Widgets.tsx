@@ -4,6 +4,7 @@ import {
   type ChartKind, type ChartWidget, type ColType, type HeadlineWidget, type Row, type Sel, type TableWidget, type Widget,
 } from '../../dashboard'
 import { buildSpec } from './vegaSpec'
+import { chartData } from './chartData'
 import { VegaChart } from './VegaChart'
 
 // ---------------------------------------------------------------- icons
@@ -140,16 +141,21 @@ export function TableBody({ w, rows, types, highlight, selectBy, selection, onSe
 
 // ---------------------------------------------------------------- chart
 
-export function ChartBody({ w, rows, types, drive, highlight, selection, onSelect }: {
+export function ChartBody({ w, rows, types, drive, highlight, highlightFn, selection, onSelect }: {
   w: ChartWidget; rows: Row[]; types: Record<string, ColType>
-  drive: boolean; highlight: boolean; selection: Sel | null; onSelect?: (s: Sel | null) => void
+  drive: boolean; highlight: boolean
+  /** Which rows another object's pick highlights (null while nothing is picked). */
+  highlightFn: ((r: Row) => boolean) | null
+  selection: Sel | null; onSelect?: (s: Sel | null) => void
 }) {
   const selectBy = defaultSelectBy(w, types)
   const { spec, select } = useMemo(() => buildSpec(w, { types, drive, highlight, selectBy }), [w, types, drive, highlight, selectBy])
   const specKey = useMemo(() => JSON.stringify(spec), [spec])
+  const data = useMemo(() => chartData(w, rows, types, highlight ? highlightFn : undefined), [w, rows, types, highlight, highlightFn])
   const missing = !w.vegaLite && (!w.x ? 'This chart isn’t set up yet' : w.chart === 'heatmap' && !w.color ? 'Pick the rows for the heatmap' : w.chart === 'scatter' && !w.y.field ? 'Pick a number for the vertical axis' : w.chart === 'donut' && !w.x ? 'Pick what the slices are' : null)
   if (missing) return <div className="dash-placeholder">{missing}</div>
-  return <VegaChart spec={spec} specKey={specKey} rows={rows} select={select} active={!!selection} onSelect={onSelect} />
+  const note = data.sampled && `A sample of ${data.sampled.shown.toLocaleString()} of ${data.sampled.of.toLocaleString()} points`
+  return <VegaChart spec={spec} specKey={specKey} rows={data.rows} note={note || undefined} select={select} active={!!selection} onSelect={onSelect} />
 }
 
 // ---------------------------------------------------------------- wireframe skeletons

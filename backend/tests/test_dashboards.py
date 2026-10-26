@@ -35,7 +35,7 @@ def test_dashboard_crud_and_data(client, files):
     assert data["file"] == "sales_jan.xlsx" and data["sheet"] == "Sales" and data["read_at"]
     names = [c["name"] for c in data["columns"]]
     assert {"name": "Qty", "type": "integer"} in data["columns"] and "Region" in names
-    assert data["rows"][0][names.index("Region")] == "Luzon"
+    assert data["values"][names.index("Region")][0] == "Luzon"
 
     upd = client.put(f"/api/dashboards/{d['id']}", json={"name": "Renamed", "dataset": sel["id"], "spec": _spec()}).json()
     assert upd["name"] == "Renamed" and upd["spec"]["links"] == []

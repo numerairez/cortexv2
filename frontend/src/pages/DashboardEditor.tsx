@@ -283,8 +283,7 @@ export default function DashboardEditor() {
       const inc = live ? spec.links.filter((l) => l.target === w.id && !selIsEmpty(sels[l.source])) : []
       const filters = inc.filter((l) => l.effect === 'filter' || !canHighlight(w))
       const highlights = inc.filter((l) => l.effect === 'highlight' && canHighlight(w))
-      const layered = live && w.type === 'chart' && canHighlight(w) && spec.links.some((l) => l.target === w.id && l.effect === 'highlight')
-      const key = JSON.stringify([w.filter ?? null, filters.map((l) => sels[l.source]), highlights.map((l) => sels[l.source]), layered, data?.rows.length])
+      const key = JSON.stringify([w.filter ?? null, filters.map((l) => sels[l.source]), highlights.map((l) => sels[l.source]), rows.length])
       const hit = cache.current.get(w.id)
       seen.add(w.id)
       if (hit && hit.key === key) { out[w.id] = hit.value; continue }
@@ -292,9 +291,8 @@ export default function DashboardEditor() {
       const hsels = highlights.map((l) => sels[l.source])
       // The object's own filter first, then whatever other objects' picks narrow it to.
       const own = applyFilter(rows, w.filter, types)
-      let r = fsels.length ? own.filter((row) => fsels.every((s) => matches(row, s))) : own
+      const r = fsels.length ? own.filter((row) => fsels.every((s) => matches(row, s))) : own
       const highlightFn = hsels.length ? (row: Row) => hsels.every((s) => matches(row, s)) : null
-      if (layered) r = r.map((row) => ({ ...row, __hl: highlightFn ? highlightFn(row) : true }))
       const value: WidgetData = {
         rows: r, highlightFn, highlighted: highlightFn ? r.filter(highlightFn) : null,
         filteredBy: filters.map((l) => spec.widgets.find((x) => x.id === l.source)?.title ?? ''),
@@ -338,7 +336,7 @@ export default function DashboardEditor() {
       return <TableBody w={w} rows={d.rows} types={types} highlight={d.highlightFn} selectBy={by} selection={sels[w.id] ?? null} onSelect={(s) => setSel(w.id, s)} />
     }
     const highlightTarget = live && canHighlight(w) && spec.links.some((l) => l.target === w.id && l.effect === 'highlight')
-    return <ChartBody w={w} rows={d.rows} types={types} drive={live && drives(w)} highlight={highlightTarget} selection={sels[w.id] ?? null} onSelect={(s) => setSel(w.id, s)} />
+    return <ChartBody w={w} rows={d.rows} types={types} drive={live && drives(w)} highlight={highlightTarget} highlightFn={d.highlightFn} selection={sels[w.id] ?? null} onSelect={(s) => setSel(w.id, s)} />
   }
 
   // The context under each object: where its numbers come from and what narrows them.
@@ -582,7 +580,7 @@ export default function DashboardEditor() {
         </>}>
           <div className="stack">
             <p>This dashboard is computed from <b>{dash.dataset_label ?? 'a dataset that is no longer in your library'}</b>{data && <> — {data.row_count.toLocaleString()} rows, {columns.length} columns</>}. Every number is worked out on this PC each time it opens, so it always reflects the current file.</p>
-            {data?.truncated && <div className="alert warn">Only the first {data.rows.length.toLocaleString()} rows are used. Summarise the data in a workflow first for complete figures.</div>}
+            {data?.truncated && <div className="alert warn">Only the first {rows.length.toLocaleString()} rows are used. Summarise the data in a workflow first for complete figures.</div>}
             {data?.warnings.map((w, i) => <div key={i} className="alert warn small">{w}</div>)}
           </div>
         </Modal>

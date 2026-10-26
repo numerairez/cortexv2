@@ -33,11 +33,13 @@ function useColorScheme() {
   return dark
 }
 
-export function VegaChart({ spec, specKey, rows, select, active, onSelect }: {
+export function VegaChart({ spec, specKey, rows, note, select, active, onSelect }: {
   spec: Record<string, unknown>
   /** Changes whenever the spec does; the chart is rebuilt only then (data updates are pushed in place). */
   specKey: string
   rows: Row[]
+  /** A small note in the chart's corner, e.g. that it shows a sample. */
+  note?: string
   select: SelectInfo | null
   /** Whether the dashboard still holds this chart's selection; when it drops it, the chart clears too. */
   active: boolean
@@ -116,6 +118,7 @@ export function VegaChart({ spec, specKey, rows, select, active, onSelect }: {
   return (
     <div className="vega-host">
       <div ref={host} className={`vega-canvas${ready ? ' ready' : ''}`} />
+      {note && !error && <div className="vega-note">{note}</div>}
       {error && <div className="vega-error"><b>This chart can’t be drawn.</b><span>{error}</span></div>}
     </div>
   )

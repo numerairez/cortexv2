@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from ..core import dashboards
@@ -32,7 +33,9 @@ def create_dashboard(body: DashboardBody):
 
 @router.get("/dashboards/data")
 def dashboard_data(dataset: str):
-    return dashboards.dataset_rows(dataset)
+    # Already JSON-ready; returning a response directly skips FastAPI's per-value encoder,
+    # which costs seconds on hundreds of thousands of rows.
+    return JSONResponse(dashboards.dataset_rows(dataset))
 
 
 @router.get("/dashboards/{dashboard_id}")

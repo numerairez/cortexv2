@@ -32,7 +32,7 @@ from .base import OptionField, ResponseOutcome, Service, register
 def load_bindings(bindings: dict[str, str]) -> tuple[dict[str, pd.DataFrame], list[dict]]:
     """Load each bound dataset. A binding is a sheet selection id, or a data template
     (``tpl_x`` for the newest file, ``tpl_x@value`` for a specific one). Returns tables and provenance."""
-    from ..core import templates
+    from ..core import table_cache, templates
 
     tables: dict[str, pd.DataFrame] = {}
     info: list[dict] = []
@@ -53,7 +53,7 @@ def load_bindings(bindings: dict[str, str]) -> tuple[dict[str, pd.DataFrame], li
             path, cfg, label, source_id = Path(src["location"]), sel["config"], sel["label"], src["id"]
         try:
             fp = documents.fingerprint_file(path)
-            t = tabular.load_table(path, cfg["sheet"], int(cfg.get("header_row") or 1), cfg.get("columns") or None)
+            t = table_cache.load_table(path, cfg["sheet"], int(cfg.get("header_row") or 1), cfg.get("columns") or None, fp["sha256"])
         except (tabular.TabularError, documents.DocumentError) as e:
             raise SourceError(f"Input '{role}' ({label}): {e}")
         warnings = list(t.warnings)

@@ -50,3 +50,24 @@ def test_csv_export_escapes_formula_text(files, tmp_path):
     text = out.read_text(encoding="utf-8-sig")
     assert "'=HYPERLINK" in text
     assert ",=HYPERLINK" not in text
+
+
+def test_column_values_match_per_value_conversion():
+    import datetime as dt
+    import math
+
+    import pandas as pd
+
+    df = tabular.normalise_types(pd.DataFrame({
+        "when": [dt.datetime(2024, 1, 5), None, dt.datetime(2024, 2, 1, 9, 30)],
+        "precise": [dt.datetime(2024, 1, 5, 0, 0, 0, 1500), dt.datetime(2024, 1, 6), None],
+        "n": [1, None, 3],
+        "x": [1.5, float("inf"), None],
+        "flag": [True, None, False],
+        "name": ["a", None, "c"],
+    }, dtype=object))
+    for col in df.columns:
+        expected = [tabular.to_json_value(v) for v in df[col]]
+        expected = [None if isinstance(v, float) and math.isinf(v) else v for v in expected]
+        assert tabular.column_values(df[col]) == expected, col
+    assert tabular.column_values(df["n"], limit=1) == [1]

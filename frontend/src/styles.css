@@ -863,6 +863,7 @@ button.output-from-step { align-self: flex-start; display: inline-flex; align-it
 .vega-canvas { position: absolute; inset: 0; opacity: 0; transition: opacity .2s; }
 .vega-canvas.ready { opacity: 1; }
 .vega-canvas svg { display: block; }
+.vega-note { position: absolute; right: 6px; bottom: 2px; font-size: 11px; color: var(--muted); pointer-events: none; }
 .vega-error { position: absolute; inset: 4px; display: flex; flex-direction: column; gap: 4px; padding: 12px; background: var(--bad-soft); color: var(--bad); border-radius: 8px; font-size: 12.5px; overflow: auto; }
 #vg-tooltip-element.vg-tooltip.custom-theme { background: var(--fg); color: var(--bg); border: 0; border-radius: 8px; padding: 6px 10px; font: 12.5px/1.45 "Segoe UI", system-ui, sans-serif; box-shadow: 0 8px 24px rgba(0, 0, 0, .22); }
 #vg-tooltip-element.custom-theme table tr td.key { color: color-mix(in srgb, var(--bg) 70%, transparent); padding-right: 10px; }

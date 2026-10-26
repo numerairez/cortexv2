@@ -11,10 +11,11 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 EXCEL_EXTS = {".xlsx", ".xlsm"}
@@ -230,15 +231,20 @@ def load_table(path: Path, sheet: str, header_row: int = 1, columns: list[str] |
     df = pd.DataFrame(data, columns=names, dtype=object)
     df = normalise_types(df)
 
+    letters = {n: column_letter(i + 1) for n, i in zip(names, keep)}
+    t = LoadedTable(df=df, warnings=warnings, header_row=header_row, first_data_row=header_row + 1,
+                    original_headers=[_jsonable(h) for h in header], letters=letters)
+    return select_columns(t, columns)
+
+
+def select_columns(t: LoadedTable, columns: list[str] | None) -> LoadedTable:
+    """Narrow a loaded table to the selection's column subset (all columns when there is none)."""
     if columns:
-        missing = [c for c in columns if c not in df.columns]
+        missing = [c for c in columns if c not in t.df.columns]
         if missing:
             raise TabularError(f"Selected column(s) no longer present: {', '.join(missing)}")
-        df = df[columns]
-    letters = {n: column_letter(i + 1) for n, i in zip(names, keep)}
-    return LoadedTable(df=df, warnings=warnings, header_row=header_row, first_data_row=header_row + 1,
-                       original_headers=[_jsonable(h) for h in header],
-                       letters={c: letters[c] for c in df.columns if c in letters})
+        t = replace(t, df=t.df[columns])
+    return replace(t, warnings=list(t.warnings), letters={c: t.letters[c] for c in t.df.columns if c in t.letters})
 
 
 def normalise_types(df: pd.DataFrame) -> pd.DataFrame:
@@ -330,6 +336,22 @@ def to_json_value(v: Any) -> Any:
     if isinstance(v, pd.Timestamp):
         return v.isoformat()
     return _jsonable(v.item() if hasattr(v, "item") and not isinstance(v, str) else v)
+
+
+def column_values(s: pd.Series, limit: int | None = None) -> list[Any]:
+    """One column as JSON-ready values, converted like ``to_json_value`` but a column at a time:
+    fast enough for hundreds of thousands of rows. Infinite numbers become None."""
+    if limit is not None:
+        s = s.iloc[:limit]
+    if pd.api.types.is_datetime64_any_dtype(s):
+        if getattr(s.dt, "tz", None) is None and not (s.dt.microsecond.fillna(0) != 0).any():
+            return s.dt.strftime("%Y-%m-%dT%H:%M:%S").astype(object).where(s.notna(), None).tolist()
+        return [None if pd.isna(v) else v.isoformat() for v in s]
+    if pd.api.types.is_float_dtype(s):
+        s = s.where(np.isfinite(s))
+    if pd.api.types.is_numeric_dtype(s) or pd.api.types.is_bool_dtype(s):
+        return s.astype(object).where(s.notna(), None).tolist()
+    return [v if v is None or isinstance(v, str) else to_json_value(v) for v in s.tolist()]
 
 
 def records(df: pd.DataFrame, limit: int | None = None) -> list[list[Any]]:
