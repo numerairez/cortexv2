@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { CONFLUENCE_ENABLED } from '../features'
 import { FolderPicker } from '../components/FolderPicker'
 import { ErrorBox, Field, Loading, useLoad, useToast } from '../components/ui'
 import type { Settings } from '../types'
@@ -103,7 +104,7 @@ export default function SettingsPage() {
           )}
         </div>
 
-        <div className="card stack" style={{ gridColumn: '1 / -1' }}>
+        {CONFLUENCE_ENABLED && <div className="card stack" style={{ gridColumn: '1 / -1' }}>
           <h2>Confluence connection</h2>
           <p className="muted small">Read-only. Uses a personal access token you create in Confluence (Profile → Personal Access Tokens). The token is kept in memory for this session only and is never saved to disk.</p>
           {form && (
@@ -134,7 +135,7 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
-        </div>
+        </div>}
       </div>
       {picking && <FolderPicker title="Save files to…" start={settings.data?.save_folder} onClose={() => setPicking(false)} onPick={saveFolder} />}
     </>

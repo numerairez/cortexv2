@@ -20,6 +20,8 @@ Your data (database, outputs, logs) lives in `%LOCALAPPDATA%\Flowbook`, not in t
 
 Requirements: Python 3.10+ (3.11+ uses the pinned lock file). No administrator rights or Node.js needed.
 
+**Updating to a new version:** close the black Flowbook window, delete the old app folder (or use a new one; don't unzip on top of it, or files removed from the app stay behind), unzip the new release, run `setup.bat` once, then `launch.bat`. If the old version is still running, `launch.bat` says so and asks you to close it first, rather than opening the old screens. Your data is kept.
+
 ## What's implemented (MVP, milestones 1–3)
 
 | Area | Status |
@@ -40,7 +42,7 @@ Requirements: Python 3.10+ (3.11+ uses the pinned lock file). No administrator r
 | AI-drafted recipes: schema-only (or approved samples) prompt → pasted JSON validated by the same schema and executor | ✅ |
 | Knowledge Base service: anchored source prompts, untrusted-content delimiting, JSON contract, citation validation, corrective follow-up prompt, Markdown/HTML/JSON outputs | ✅ |
 | Runs: append-only history, snapshots/provenance, prompt/reply history (retention toggle), artifacts | ✅ |
-| Confluence (Data Center/Server REST, session-only personal access token) | ⚠️ Implemented, untested against the real intranet (Milestone 0 spike) |
+| Confluence (Data Center/Server REST, session-only personal access token) | ⚠️ Implemented, untested against the real intranet (Milestone 0 spike). Hidden in the UI with context collections; set `CONFLUENCE_ENABLED` in `frontend/src/features.ts` to show it |
 | **Dashboards** (Vega-Lite): headlines, charts and tables (rows, summary or **pivot** with totals) on one library dataset, started from a gallery of **layout templates** filled from the dataset's own columns (some with interactions pre-wired), each with its own filter (same conditions as a workflow Filter step) and a caption naming its data source, row count and active filters, suggested starting layout, drag/resize grid editor, field drag-and-drop; static by default, with an **Interactions** wireframe mode to link objects so a click filters or highlights others; **describe interactions in words** (chatbot proposes filter/highlight links, previewed on the wireframe as a diff before applying); **describe an object in words** inside its wireframe → copy a prompt for the approved chatbot → paste the reply, validated against the dataset's columns (builder settings or Vega-Lite); optional hand-written Vega-Lite per chart (no external data or links) | ✅ |
 
 ## Development
@@ -55,14 +57,28 @@ cd backend && ../.venv/bin/python -m pytest -q
 cd frontend && npm install && npm run dev
 
 # run the full app (serves frontend/dist); use a throwaway data folder while developing
-npm --prefix frontend run build
 CW_DATA_DIR=$PWD/.cw-dev-data ./launch.sh
 
 # demo files are committed in samples/; regenerate them with:
 .venv/bin/python scripts/make_samples.py
 ```
 
-To build a release for colleagues, run `python scripts/build_release.py --wheels`. This creates `release/flowbook-<version>/` and a `.zip` with the compiled UI, launch/setup scripts, and Windows wheels for offline setup.
+The full app serves the compiled UI in `frontend/dist`, not `frontend/src`. When you start it from a checkout, the launcher rebuilds `frontend/dist` (`npm run build`) if anything in `frontend/src` changed since the last build, and stops with the errors if the build fails. Releases don't include `frontend/src`, so this check never runs on colleagues' PCs.
+
+The server sends `Cache-Control: no-cache` for `index.html` and the other un-hashed files, so browsers pick up a new build on a normal reload. Files in `/assets` have content-hashed names and can be cached.
+
+### Building a release for colleagues
+
+1. Bump `APP_VERSION` in `backend/app/config.py` (e.g. `0.1.0` → `0.1.1`). The launcher compares versions: if an older version is still running when a colleague starts the new one, it asks them to close it instead of opening the old screens. Without a bump, it can't tell the two apart.
+2. Run `python scripts/build_release.py --wheels` (needs Node.js/npm and internet access on your machine). It:
+   - runs `npm ci` and `npm run build` in `frontend/`, so the release always has a fresh UI (`--skip-ui` reuses the existing `frontend/dist`);
+   - recreates `release/flowbook-<version>/`, deleting any earlier folder for the same version;
+   - copies in `backend/` (without tests and caches), `frontend/dist`, `samples/`, `launch.bat`, `setup.bat`, `launch.sh`, `README.md` and `PLAN.md`;
+   - with `--wheels`, downloads every package in `backend/requirements.lock` as a Windows 64-bit wheel for Python 3.11 into `wheels/`, so `setup.bat` installs offline (`--python-version` targets another Python, e.g. `3.12`);
+   - zips the folder to `release/flowbook-<version>.zip`.
+3. Send the zip. Colleagues follow [Updating to a new version](#for-colleagues-windows).
+
+The bundled wheels match one Python version. A colleague whose Python differs (check with `py --version`) needs a release built with `--python-version` set to theirs. On Python 3.10, `setup.bat` installs `backend/requirements.txt` instead of the lock file, which the 3.11 wheels don't cover.
 
 ### Layout
 

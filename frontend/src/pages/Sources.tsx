@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { api } from '../api'
+import { CONFLUENCE_ENABLED } from '../features'
 import { FileBrowser } from '../components/FileBrowser'
 import { FeedList, useFeeds } from '../components/AddData'
 import { Empty, ErrorBox, Field, Loading, Modal, Spinner, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
@@ -112,7 +113,7 @@ export default function Sources() {
         {loading && !data ? <Loading /> : data && data.length === 0 ? (
           <div className="card">
             <Empty title="No sources yet">
-              <p>Add an Excel workbook, CSV, PDF, Word, text/Markdown file, or a Confluence page.</p>
+              <p>Add an Excel workbook, CSV, PDF, Word, text/Markdown file{CONFLUENCE_ENABLED ? ', or a Confluence page' : ''}.</p>
               <button className="primary" onClick={() => setAdding(true)}>+ Add your first source</button>
             </Empty>
           </div>
@@ -331,7 +332,7 @@ function AddSourceModal({ onClose, onAdded }: { onClose: () => void; onAdded: (s
     </>}>
       <div className="tabs">
         <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>File on this PC / network drive</button>
-        <button className={tab === 'confluence' ? 'active' : ''} onClick={() => setTab('confluence')}>Confluence page</button>
+        {CONFLUENCE_ENABLED && <button className={tab === 'confluence' ? 'active' : ''} onClick={() => setTab('confluence')}>Confluence page</button>}
         {feeds && feeds.length > 0 && <button className={tab === 'feed' ? 'active' : ''} onClick={() => setTab('feed')}>Data feeds</button>}
       </div>
       <ErrorBox error={error} />

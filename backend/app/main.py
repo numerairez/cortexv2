@@ -97,10 +97,13 @@ def create_app(allowed_ports: set[int] | None = None) -> FastAPI:
         def spa(full_path: str):
             if full_path.startswith("api/"):
                 return JSONResponse({"detail": "Not found"}, status_code=404)
+            # Files under /assets have hashed names and may be cached; these (index.html, favicon…) do not, so
+            # browsers must re-check them or they keep showing the previous build after an update.
+            headers = {"Cache-Control": "no-cache"}
             candidate = (FRONTEND_DIST / full_path).resolve()
             if full_path and candidate.is_file() and FRONTEND_DIST.resolve() in candidate.parents:
-                return FileResponse(candidate)
-            return FileResponse(FRONTEND_DIST / "index.html")
+                return FileResponse(candidate, headers=headers)
+            return FileResponse(FRONTEND_DIST / "index.html", headers=headers)
     else:
         @app.get("/", include_in_schema=False)
         def no_ui():

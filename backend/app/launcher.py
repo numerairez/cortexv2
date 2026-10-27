@@ -61,12 +61,45 @@ def setup_logging(log_dir) -> None:
     logging.getLogger("uvicorn.access").disabled = True
 
 
-def healthy(port: int, timeout: float = 1.0) -> bool:
+def rebuild_ui_if_stale() -> None:
+    """Developer checkouts only: rebuild frontend/dist when frontend/src changed since the last build.
+
+    The server serves the built UI, so without this an edit in frontend/src does not show up.
+    Releases ship dist without src, so this does nothing for colleagues.
+    """
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    frontend = Path(__file__).resolve().parents[2] / "frontend"
+    src, built = frontend / "src", frontend / "dist" / "index.html"
+    if not src.is_dir():
+        return
+    inputs = [p for p in src.rglob("*") if p.is_file()] + [frontend / "index.html", frontend / "package.json"]
+    newest = max((p.stat().st_mtime for p in inputs if p.exists()), default=0)
+    if built.exists() and built.stat().st_mtime >= newest:
+        return
+    npm = shutil.which("npm")
+    if not npm:
+        print("Note: the UI in frontend/dist is older than frontend/src; run 'npm run build' in frontend/ to update it.")
+        return
+    print("frontend/src changed since the last build; rebuilding the UI…")
+    if subprocess.run([npm, "run", "build"], cwd=frontend).returncode != 0:
+        fail("Building the UI failed (see the errors above). Fix them, or run 'npm run build' in frontend/.")
+
+
+def running_version(port: int, timeout: float = 1.0) -> str | None:
+    """The version of the Flowbook answering on ``port``, or None if none does."""
     try:
         with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=timeout) as r:
-            return json.load(r).get("app") == "flowbook"
+            info = json.load(r)
+            return str(info.get("version", "")) if info.get("app") == "flowbook" else None
     except Exception:
-        return False
+        return None
+
+
+def healthy(port: int, timeout: float = 1.0) -> bool:
+    return running_version(port, timeout) is not None
 
 
 def port_free(port: int) -> bool:
@@ -85,8 +118,9 @@ def main() -> None:
     args = parser.parse_args()
 
     check_environment()
+    rebuild_ui_if_stale()
 
-    from .config import DEFAULT_PORT, HOST, get_paths
+    from .config import APP_VERSION, DEFAULT_PORT, HOST, get_paths
 
     paths = get_paths()
     setup_logging(paths.logs)
@@ -96,7 +130,12 @@ def main() -> None:
     if paths.instance_file.exists():
         try:
             info = json.loads(paths.instance_file.read_text())
-            if healthy(int(info["port"])):
+            version = running_version(int(info["port"]))
+            if version is not None and version != APP_VERSION:
+                # Opening it would show the previous version's screens after an update.
+                fail(f"An older Flowbook ({version}) is still running. Close its black window, "
+                     f"then start this version ({APP_VERSION}) again.")
+            if version is not None:
                 url = f"http://127.0.0.1:{info['port']}/"
                 print(f"Flowbook is already running at {url} — opening it.")
                 if not args.no_browser:
