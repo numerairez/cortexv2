@@ -36,14 +36,14 @@ function Icon({ d }: { d: React.ReactNode }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>{d}</svg>
 }
 
-const NAV: { to: string; label: string; icon: React.ReactNode; end?: boolean; section?: string }[] = [
+const NAV: { to: string; label: string; icon: React.ReactNode; end?: boolean; section?: string; soon?: boolean }[] = [
   { to: '/', label: 'Workflows', icon: I.workflows, end: true },
   { to: '/dashboards', label: 'Dashboards', icon: I.dashboards },
   { to: '/sources', label: 'My data', icon: I.sources },
   { to: '/runs', label: 'History', icon: I.runs },
   { to: '/library', label: 'Output files', icon: I.library },
-  { to: '/services', label: 'Knowledge bases', icon: I.services, section: 'More tools' },
-  { to: '/contexts', label: 'Context collections', icon: I.contexts },
+  { to: '/services', label: 'Knowledge bases', icon: I.services, section: 'More tools', soon: true },
+  { to: '/contexts', label: 'Context collections', icon: I.contexts, soon: true },
   { to: '/settings', label: 'Settings', icon: I.settings, section: ' ' },
   { to: '/about', label: 'About', icon: I.about },
 ]
@@ -73,9 +73,15 @@ export default function App() {
           {NAV.map((n) => (
             <span key={n.to} style={{ display: 'contents' }}>
               {n.section && <div className="nav-section">{n.section}</div>}
-              <NavLink to={n.to} end={n.end} className={({ isActive }) => (isActive || (n.to === '/' && inWorkflows) ? 'active' : '')} title={n.label}>
-                <Icon d={n.icon} /><span className="label">{n.label}</span>
-              </NavLink>
+              {n.soon ? (
+                <a className="soon" aria-disabled="true" title={`${n.label}: coming soon`}>
+                  <Icon d={n.icon} /><span className="soon-text"><span className="label">{n.label}</span><span className="soon-tag">Soon</span></span>
+                </a>
+              ) : (
+                <NavLink to={n.to} end={n.end} className={({ isActive }) => (isActive || (n.to === '/' && inWorkflows) ? 'active' : '')} title={n.label}>
+                  <Icon d={n.icon} /><span className="label">{n.label}</span>
+                </NavLink>
+              )}
             </span>
           ))}
         </nav>

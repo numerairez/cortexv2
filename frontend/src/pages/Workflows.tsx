@@ -51,45 +51,14 @@ export default function Workflows() {
         </div>
       </div>
 
-      <div className="start-grid">
-        <DropZone onFiles={startWithFiles} className="start-tile primary-tile" accept=".xlsx,.xlsm,.csv,.tsv">
-          {busy ? <><Spinner /> Opening…</> : <>
-            <div className="row" style={{ gap: 6 }}><FileIcon kind="excel" size={34} /><FileIcon kind="csv" size={34} /></div>
-            <h2>Start a new workflow</h2>
-            <p>Drop an Excel or CSV file here, or click to choose one.</p>
-            <Link className="btn primary" to="/workflows/new" onClick={(e) => e.stopPropagation()}>Start with a blank workflow</Link>
-          </>}
-        </DropZone>
-        <div className="start-stack">
-          <Link to="/workflows/from-macro" className="start-tile">
-            <CodeBadge language="vba" size={34} />
-            <h2>Turn an Excel macro into a workflow</h2>
-            <p>We read the macro (never run it), find every file and sheet it uses, and your AI chatbot translates it into steps you can see and check.</p>
-            <span className="btn">Import a macro →</span>
-          </Link>
-          <Link to="/workflows/from-python" className="start-tile">
-            <CodeBadge language="python" size={34} />
-            <h2>Turn a Python script into a workflow</h2>
-            <p>Same for pandas scripts and notebooks: the code is read, never run, and translated into steps you can see and check.</p>
-            <span className="btn">Import a script →</span>
-          </Link>
-          <Link to="/workflows/from-document" className="start-tile">
-            <CodeBadge language="doc" size={34} />
-            <h2>Turn a process document into a workflow</h2>
-            <p>Have the steps written down in Word or PDF? Your AI chatbot reads the text, and any screenshots or flowcharts in it, and turns them into steps you can see and check.</p>
-            <span className="btn">Import a document →</span>
-          </Link>
-        </div>
-      </div>
-
-      <div className="row between" style={{ margin: '28px 0 12px' }}>
+      <div className="row between" style={{ margin: '0 0 12px' }}>
         <h2 style={{ margin: 0 }}>Your workflows</h2>
         {(data?.length ?? 0) > 4 && <input style={{ maxWidth: 280 }} placeholder="Search workflows…" value={filter} onChange={(e) => setFilter(e.target.value)} />}
       </div>
       <ErrorBox error={error} />
       {loading && !data ? <Loading /> : shown.length === 0 ? (
         <div className="card"><Empty title={data?.length ? 'No matches' : 'No saved workflows yet'}>
-          {!data?.length && <p>Build one above and press <b>Save</b> — next month, just connect the new files and run it again.</p>}
+          {!data?.length && <p>Build one below and press <b>Save</b> — next month, just connect the new files and run it again.</p>}
         </Empty></div>
       ) : (
         <div className="wf-grid">
@@ -123,6 +92,36 @@ export default function Workflows() {
           ))}
         </div>
       )}
+
+      <h2 style={{ margin: '28px 0 12px' }}>Build a new workflow</h2>
+      <div className="start-grid">
+        <DropZone onFiles={startWithFiles} className="start-tile primary-tile" accept=".xlsx,.xlsm,.csv,.tsv">
+          {busy ? <><Spinner /> Opening…</> : <>
+            <div className="row" style={{ gap: 6 }}><FileIcon kind="excel" size={34} /><FileIcon kind="csv" size={34} /></div>
+            <h2>Start a new workflow</h2>
+            <p>Drop an Excel or CSV file here, or click to choose one.</p>
+            <Link className="btn primary" to="/workflows/new" onClick={(e) => e.stopPropagation()}>Start with a blank workflow</Link>
+          </>}
+        </DropZone>
+        <Link to="/workflows/from-macro" className="start-tile">
+          <CodeBadge language="vba" size={34} />
+          <h2>Turn an Excel macro into a workflow</h2>
+          <p>We read the macro (never run it), find every file and sheet it uses, and your AI chatbot translates it into steps you can see and check.</p>
+          <span className="btn">Import a macro →</span>
+        </Link>
+        <Link to="/workflows/from-python" className="start-tile">
+          <CodeBadge language="python" size={34} />
+          <h2>Turn a Python script into a workflow</h2>
+          <p>Same for pandas scripts and notebooks: the code is read, never run, and translated into steps you can see and check.</p>
+          <span className="btn">Import a script →</span>
+        </Link>
+        <Link to="/workflows/from-document" className="start-tile">
+          <CodeBadge language="doc" size={34} />
+          <h2>Turn a process document into a workflow</h2>
+          <p>Have the steps written down in Word or PDF? Your AI chatbot reads the text, and any screenshots or flowcharts in it, and turns them into steps you can see and check.</p>
+          <span className="btn">Import a document →</span>
+        </Link>
+      </div>
 
       <div className="card" style={{ marginTop: 28 }}>
         <div className="row between">
