@@ -69,6 +69,33 @@ def test_notebook_and_errors(tmp_path):
         pycode.load(code="def broken(:\n  pass")
 
 
+def test_code_from_other_files_is_flagged(tmp_path):
+    """One file is read per workflow, so code it pulls in from the user's other files is listed;
+    the standard library and data libraries (installed here or not) are not."""
+    (tmp_path / "helpers.py").write_text("def clean(df): return df\n", encoding="utf-8")
+    script = tmp_path / "main.py"
+    script.write_text("\n".join([
+        "import os, json",
+        "import pandas as pd",
+        "import xlwings as xw",
+        "from helpers import clean",
+        "import risk_utils.fx as fx",
+        "from .shared import load",
+        "df = clean(pd.read_excel('positions.xlsx'))",
+    ]), encoding="utf-8")
+    found = {d["module"]: d for d in pycode.load(path=script)["local_imports"]}
+    assert set(found) == {"helpers", "risk_utils.fx", ".shared"}
+    assert found["helpers"]["certainly_local"] and found["helpers"]["lines"] == ["main.py:4"]
+    assert found[".shared"]["certainly_local"]
+    assert not found["risk_utils.fx"]["certainly_local"]   # not beside the script: could be a library
+
+    nb = tmp_path / "report.ipynb"
+    nb.write_text(json.dumps({"cells": [{"cell_type": "code", "source": ["%run ./prepare_positions.ipynb\n", "x = 1"]}]}),
+                  encoding="utf-8")
+    assert [d["module"] for d in pycode.load(path=nb)["local_imports"]] == ["./prepare_positions.ipynb"]
+    assert pycode.load(code="import pandas as pd\nimport os")["local_imports"] == []
+
+
 def test_python_to_workflow_end_to_end(client, files):
     a = client.post("/api/macros/analyse", json={"code": SCRIPT, "name": "report.py", "language": "python"}).json()
     assert a["modules"][0]["name"] == "report.py"

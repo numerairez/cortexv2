@@ -10,8 +10,10 @@ result has the same shape as ``vba.load`` so the macro import flow can reuse it.
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import re
+import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from .vba import DATA_EXT, Module, VBAError
@@ -34,6 +36,16 @@ DB_MODULES = {"sqlite3", "pyodbc", "psycopg2", "psycopg", "pymysql", "mysql", "c
 WEB_CALLS = {"get", "post", "urlopen", "urlretrieve", "request"}
 WEB_MODULES = {"requests", "urllib", "httpx", "aiohttp"}
 USER_PICK_CALLS = {"askopenfilename", "askopenfilenames", "askdirectory", "input"}
+
+# Libraries common in data scripts that Flowbook itself may not have installed: importing these is
+# not a sign of code living in another of the user's files.
+KNOWN_LIBRARIES = {
+    "pandas", "numpy", "openpyxl", "xlrd", "xlwt", "xlsxwriter", "xlwings", "pyxlsb", "calamine", "polars", "pyarrow",
+    "scipy", "sklearn", "statsmodels", "matplotlib", "seaborn", "plotly", "tabulate", "tqdm", "dateutil", "pytz",
+    "yaml", "dotenv", "win32com", "pywintypes", "pythoncom", "tkinter", "IPython", "docx", "pypdf", "PyPDF2",
+    "smtplib", "yagmail", "exchangelib", "schedule", "pydantic", "attr", "attrs", "rich", "click", "typer",
+} | DB_MODULES | WEB_MODULES
+NOTEBOOK_RUN = re.compile(r"^#\s*%run\s+(?:-\S+\s+)*['\"]?([^\s'\"]+)", re.MULTILINE)
 
 # (modules, call names, label): a call matches when its dotted name starts with one of
 # the modules, or — for an empty module set — when its last part is one of the names.
@@ -153,6 +165,50 @@ def notebook_code(raw: str) -> str:
 def modules_from_text(code: str, name: str = "Pasted code") -> list[Module]:
     code = code.replace("\r\n", "\n").replace("\r", "\n").strip("\n")
     return [Module(name=name, kind="standard", code=code, procedures=list_procedures(_parse(code, name)))]
+
+
+def _is_library(name: str) -> bool:
+    if name in sys.stdlib_module_names or name in KNOWN_LIBRARIES:
+        return True
+    try:
+        return importlib.util.find_spec(name) is not None   # finds the module without importing it
+    except (ImportError, ValueError):
+        return False
+
+
+def local_imports(modules: list[Module], script_dir: Path | None = None) -> list[dict]:
+    """Code the script pulls in from other files, which Flowbook does not read: relative imports,
+    imports that aren't a known library, and notebooks loaded with %run. ``certainly_local`` for
+    relative imports, %run, and modules whose .py file or package sits beside the script; otherwise
+    the name may also be a library Flowbook doesn't have installed."""
+    found: dict[str, dict] = {}
+
+    def add(name: str, where: str, certain: bool):
+        d = found.setdefault(name, {"module": name, "lines": [], "certainly_local": False})
+        d["certainly_local"] |= certain
+        if where not in d["lines"] and len(d["lines"]) < 10:
+            d["lines"].append(where)
+
+    def beside(top: str) -> bool:
+        return bool(script_dir) and ((script_dir / f"{top}.py").is_file() or (script_dir / top / "__init__.py").is_file())
+
+    for mod in modules:
+        for node in ast.walk(_parse(mod.code, mod.name)):
+            where = f"{mod.name}:{getattr(node, 'lineno', 0)}"
+            if isinstance(node, ast.ImportFrom) and node.level:
+                add("." * node.level + (node.module or ""), where, True)
+                continue
+            names = [a.name for a in node.names] if isinstance(node, ast.Import) else \
+                [node.module] if isinstance(node, ast.ImportFrom) and node.module else []
+            for name in names:
+                top = name.split(".")[0]
+                if beside(top):
+                    add(name, where, True)
+                elif not _is_library(top):
+                    add(name, where, False)
+        for m in NOTEBOOK_RUN.finditer(mod.code):
+            add(m.group(1), f"{mod.name}:{mod.code.count(chr(10), 0, m.start()) + 1}", True)
+    return sorted(found.values(), key=lambda d: (not d["certainly_local"], d["module"].lower()))
 
 
 def analyse(modules: list[Module]) -> dict:
@@ -275,4 +331,5 @@ def load(path: Path | None = None, code: str | None = None, name: str | None = N
                      "readable_sheets": False},
         "modules": [m.__dict__ for m in modules],
         **analyse(modules),
+        "local_imports": local_imports(modules, path.parent if path else None),
     }

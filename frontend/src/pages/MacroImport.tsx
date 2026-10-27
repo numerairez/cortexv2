@@ -18,6 +18,8 @@ interface Dep {
 interface Analysis {
   workbook: { path: string | null; name: string | null; sheets: string[]; source_id?: string | null }
   modules: Module[]; dependencies: Dep[]; actions: { action: string; lines: string[] }[]
+  /** Python: code pulled in from other files, which is not read (one file per workflow). */
+  local_imports?: { module: string; lines: string[]; certainly_local: boolean }[]
 }
 interface DepState { role: string; selectionId?: string; ignored: boolean }
 
@@ -31,13 +33,17 @@ const LANG = {
     dropHint: '.xlsm, .xlsb, .xls — or an exported .bas module · click to choose', pathHint: 'S:\\Finance\\Monthly Report.xlsm',
     pasteHelp: <>In Excel press <b>Alt+F11</b>, open the module, select all (Ctrl+A), copy, and paste it here. Useful when the workbook is protected or the macro lives in your Personal workbook.</>,
     placeholder: 'Sub MonthlyReport()\n    ...\nEnd Sub', unit: 'module', entryLabel: 'Main macro (the one you run)', entryKind: 'sub',
+    limit: null,
   },
   python: {
     noun: 'script', Noun: 'Script', badge: 'PY', service: 'python_to_workflow', accept: '.py,.ipynb',
-    title: 'Turn a Python script into a workflow', fileTab: 'Script or notebook', drop: 'Drop the Python script or notebook here',
-    dropHint: '.py or .ipynb · click to choose', pathHint: 'S:\\Finance\\monthly_report.py',
-    pasteHelp: <>Paste the Python code that prepares the data (pandas, openpyxl, csv…). Only the parts that read and reshape data become workflow steps.</>,
+    title: 'Turn a Python script into a workflow', fileTab: 'Script or notebook', drop: 'Drop one Python script or notebook here',
+    dropHint: 'One .py or .ipynb file per workflow · click to choose', pathHint: 'S:\\Finance\\monthly_report.py',
+    pasteHelp: <>Paste the Python code that prepares the data (pandas, openpyxl, csv…). Only the parts that read and reshape data become workflow steps. <b>Code split across several files?</b> Paste them one after another, the main script last.</>,
     placeholder: 'import pandas as pd\n\ndf = pd.read_excel("sales.xlsx")\n...', unit: 'file', entryLabel: 'Main function (optional)', entryKind: 'function',
+    limit: <><b>One file per workflow.</b> Flowbook reads a single script or notebook. Code it imports from your other files
+      (like <span className="mono">from helpers import …</span>) is not read. If your code is split across files, choose <b>Paste the code</b> and
+      paste them one after another, the main script last.</>,
   },
 } as const
 
@@ -96,6 +102,11 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
   const onFiles = async (files: File[]) => {
+    if (files.length > 1) {
+      setError(`Drop one ${L.noun} at a time: Flowbook reads one file per workflow, and you dropped ${files.length}.`
+        + (language === 'python' ? ' If they belong together, choose “Paste the code” and paste them one after another, the main script last.' : ''))
+      return
+    }
     setBusy(true); setError(null)
     try {
       const r = await uploadFile<UploadResult>(files[0])
@@ -213,6 +224,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
 
       {step === 1 && (
         <div className="card stack">
+          {L.limit && <div className="alert info small">{L.limit}</div>}
           <div className="tabs">
             <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>{L.fileTab}</button>
             <button className={tab === 'paste' ? 'active' : ''} onClick={() => setTab('paste')}>Paste the code</button>
@@ -276,6 +288,27 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
                   )))}
                 </select>
               </Field>
+              {!!analysis.local_imports?.length && (
+                <div className="alert warn small">
+                  <b>This {L.noun} uses code from other files, which Flowbook doesn’t read:</b>
+                  <ul>{analysis.local_imports.map((d) => (
+                    <li key={d.module}><span className="mono">{d.module}</span> <span className="faint mono">({d.lines.slice(0, 3).join(', ')})</span>
+                      {!d.certainly_local && <span className="faint"> · unless it’s a library</span>}</li>
+                  ))}</ul>
+                  Steps inside those files won’t be translated. Only one file is read per workflow, so paste the other files in together with this one.
+                  <div style={{ marginTop: 6 }}>
+                    <button className="sm" onClick={() => {
+                      // A slot for each other file above the main script, which stays last.
+                      const file = (m: string) => (m.startsWith('.') || m.endsWith('.ipynb') ? m : `${m.replace(/\./g, '/')}.py`)
+                      const slots = analysis.local_imports!.map((d) => `# --- paste ${file(d.module)} here\n`).join('\n')
+                      setPasted(`${slots}\n# --- ${analysis.workbook.name ?? 'main script'}\n${analysis.modules.map((m) => m.code).join('\n\n')}`)
+                      setTab('paste'); setStep(1)
+                    }}>
+                      Paste them together…
+                    </button>
+                  </div>
+                </div>
+              )}
               {analysis.actions.length > 0 && (
                 <div className="alert warn small">
                   <b>The {L.noun} also does things a workflow won’t:</b>
