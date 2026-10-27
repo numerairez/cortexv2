@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { api } from '../api'
 import { FileIcon, OP_COLOR, OpIcon } from '../components/Icons'
 import { CopyButton, Loading, useLoad } from '../components/ui'
+import { showTour } from '../components/Welcome'
 import { CodeBadge } from './MacroImport'
 
 interface Env {
@@ -92,6 +93,7 @@ export default function About() {
           <div className="row">
             <span className="badge info">Version {env?.app_version ?? '…'}</span>
             <span className="badge ok">Runs only on this PC</span>
+            <button className="sm" onClick={showTour}>▶ Take the tour</button>
           </div>
         </div>
       </div>

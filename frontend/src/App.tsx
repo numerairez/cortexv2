@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { api } from './api'
-import { Welcome } from './components/Welcome'
+import { Welcome, useTourRequests } from './components/Welcome'
 import About from './pages/About'
 import CollectionEditor from './pages/CollectionEditor'
 import Contexts from './pages/Contexts'
@@ -57,11 +57,13 @@ function LegacyTransform() {
 export default function App() {
   const { pathname } = useLocation()
   const inWorkflows = pathname === '/' || pathname.startsWith('/workflows')
-  const [welcome, setWelcome] = useState<Settings | null>(null)
-  useEffect(() => { api.get<Settings>('/api/settings').then((s) => { if (!s.welcomed) setWelcome(s) }).catch(() => undefined) }, [])
+  // First launch: the tour, ending with the save-folder question. 'replay': opened again from About.
+  const [tour, setTour] = useState<Settings | 'replay' | null>(null)
+  useEffect(() => { api.get<Settings>('/api/settings').then((s) => { if (!s.welcomed) setTour(s) }).catch(() => undefined) }, [])
+  useTourRequests(useCallback(() => setTour((t) => t ?? 'replay'), []))
   return (
     <div className="shell">
-      {welcome && <Welcome settings={welcome} onDone={() => setWelcome(null)} />}
+      {tour && <Welcome settings={tour === 'replay' ? undefined : tour} onDone={() => setTour(null)} />}
       <aside className="sidebar">
         <div className="brand">
           <img className="brand-logo" src="/logo.svg" alt="" width="28" height="28" />
