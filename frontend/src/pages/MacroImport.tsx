@@ -20,12 +20,20 @@ interface Analysis {
   modules: Module[]; dependencies: Dep[]; actions: { action: string; lines: string[] }[]
   /** Python: code pulled in from other files, which is not read (one file per workflow). */
   local_imports?: { module: string; lines: string[]; certainly_local: boolean }[]
+  /** Document: pictures, each marked as [Figure n …] at its line; ``file`` when it can be attached. */
+  figures?: Figure[]; figures_key?: string | null; warnings?: string[]
 }
+interface Figure {
+  id: string; kind: 'image' | 'page' | 'drawing' | 'chart'; line: number; lines: string[]; locator: string; alt: string; text: string
+  format: string; width: number; height: number; file: string | null; mode: FigureMode; reason: string
+}
+type FigureMode = 'attach' | 'describe' | 'skip'
+interface FigState { mode: FigureMode; description: string }
 interface DepState { role: string; selectionId?: string; ignored: boolean }
 
-export type CodeLanguage = 'vba' | 'python'
+export type CodeLanguage = 'vba' | 'python' | 'doc'
 
-// Everything on this page that differs between an Excel macro and a Python script.
+// Everything on this page that differs between an Excel macro, a Python script and a process document.
 const LANG = {
   vba: {
     noun: 'macro', Noun: 'Macro', badge: 'VBA', service: 'macro_to_workflow', accept: '.xlsm,.xlsb,.xls,.xltm,.xlam,.bas,.cls',
@@ -33,7 +41,7 @@ const LANG = {
     dropHint: '.xlsm, .xlsb, .xls — or an exported .bas module · click to choose', pathHint: 'S:\\Finance\\Monthly Report.xlsm',
     pasteHelp: <>In Excel press <b>Alt+F11</b>, open the module, select all (Ctrl+A), copy, and paste it here. Useful when the workbook is protected or the macro lives in your Personal workbook.</>,
     placeholder: 'Sub MonthlyReport()\n    ...\nEnd Sub', unit: 'module', entryLabel: 'Main macro (the one you run)', entryKind: 'sub',
-    limit: null,
+    limit: null, pasteTab: 'Paste the code', reviewStep: 'Review the code',
   },
   python: {
     noun: 'script', Noun: 'Script', badge: 'PY', service: 'python_to_workflow', accept: '.py,.ipynb',
@@ -44,8 +52,19 @@ const LANG = {
     limit: <><b>One file per workflow.</b> Flowbook reads a single script or notebook. Code it imports from your other files
       (like <span className="mono">from helpers import …</span>) is not read. If your code is split across files, choose <b>Paste the code</b> and
       paste them one after another, the main script last.</>,
+    pasteTab: 'Paste the code', reviewStep: 'Review the code',
+  },
+  doc: {
+    noun: 'procedure', Noun: 'Procedure', badge: 'DOC', service: 'doc_to_workflow', accept: '.docx,.pdf,.txt,.md',
+    title: 'Turn a process document into a workflow', fileTab: 'Word or PDF document', drop: 'Drop the procedure document here',
+    dropHint: '.docx or .pdf: written steps, with or without pictures · click to choose', pathHint: 'S:\\Finance\\Month-end procedure.docx',
+    pasteHelp: <>Paste the written steps. A procedure in words alone is fine. Pictures can’t be pasted here: if screenshots or flowcharts matter, use <b>Word or PDF document</b> instead.</>,
+    placeholder: '1. Open the sales report for the month.\n2. Remove rows where Qty is 0.\n...', unit: 'document', entryLabel: 'Section to translate (optional)', entryKind: 'heading',
+    limit: null, pasteTab: 'Paste the text', reviewStep: 'Review the document',
   },
 } as const
+/** Many chatbots take about this many pictures in one message. */
+const MAX_ATTACHED = 10
 
 const kindText = (noun: string): Record<Dep['kind'], { label: string; help: string }> => ({
   sheet: { label: 'Sheet in this workbook', help: `The ${noun} reads or writes this sheet.` },
@@ -80,6 +99,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
   const [adding, setAdding] = useState<{ key?: string; hint?: string; presetSource?: Source; presetSheet?: string } | null>(null)
   const [instructions, setInstructions] = useState('')
   const [samples, setSamples] = useState(false)
+  const [figs, setFigs] = useState<Record<string, FigState>>({})
   const [confirmed, setConfirmed] = useState(false)
   const { datasets: selections, byId, add: addKnownDataset } = useDatasets()
   const sheetSels = useMemo(() => selections ?? [], [selections])
@@ -95,9 +115,10 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
       setWorkbookSource(wb)
       setIncluded(Object.fromEntries(a.modules.map((m) => [m.name, true])))
       setViewing(a.modules[0]?.name ?? null)
+      setFigs(Object.fromEntries((a.figures ?? []).map((f) => [f.id, { mode: f.mode, description: '' }])))
       const subs = a.modules.flatMap((m) => m.procedures.filter((p) => p.kind === 'sub' && m.kind === 'standard'))
       // Python scripts often run top to bottom; only preselect a function called main.
-      setEntry(language === 'python' ? (a.modules.flatMap((m) => m.procedures).find((p) => p.name === 'main')?.name ?? '') : subs[0]?.name ?? '')
+      setEntry(language === 'doc' ? '' : language === 'python' ? (a.modules.flatMap((m) => m.procedures).find((p) => p.name === 'main')?.name ?? '') : subs[0]?.name ?? '')
       setStep(2)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
@@ -175,6 +196,10 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
 
   const modules = analysis?.modules.filter((m) => included[m.name]) ?? []
   const codeChars = modules.reduce((n, m) => n + m.code.length, 0)
+  const figures = analysis?.figures ?? []
+  const attached = figures.filter((f) => f.file && figs[f.id]?.mode === 'attach')
+  const described = figures.filter((f) => figs[f.id]?.mode === 'describe' && figs[f.id].description.trim())
+  const figureAt = new Map(figures.map((f) => [f.line, f]))
   const unresolved = analysis?.dependencies.filter((d) => !deps[depKey(d)]?.ignored && !deps[depKey(d)]?.selectionId) ?? []
   const bindings: Record<string, string> = {
     ...Object.fromEntries((analysis?.dependencies ?? []).map((d) => deps[depKey(d)]).filter((s) => s && !s.ignored && s.selectionId).map((s) => [s!.role, s!.selectionId!])),
@@ -193,20 +218,25 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
         title: `${L.Noun} → workflow: ${analysis?.workbook.name ?? (entry || 'pasted code')}`,
         options: { macro_name: entry || analysis?.workbook.name || L.Noun, entry, instructions, include_samples: samples,
                    sample_rows: 5, modules: modules.map((m) => ({ name: m.name, code: m.code })), dependencies: depList,
-                   actions: analysis?.actions ?? [] },
+                   actions: analysis?.actions ?? [],
+                   ...(language === 'doc' && {
+                     figures: figures.map((f) => ({ ...f, mode: figs[f.id]?.mode ?? f.mode, description: figs[f.id]?.description ?? '' })),
+                     figures_key: analysis?.figures_key }) },
       })
       nav(`/runs/${run.id}`)
     } catch (e) { setError((e as Error).message) } finally { setBusy(false) }
   }
 
-  const stepNames = [`Choose the ${L.noun}`, 'Review the code', 'Connect its data', 'Translate with AI']
+  const stepNames = [`Choose the ${L.noun}`, L.reviewStep, 'Connect its data', 'Translate with AI']
   return (
     <>
       <div className="crumbs"><Link to="/">Workflows</Link> /</div>
       <div className="page-head">
         <div>
           <h1>{L.title}</h1>
-          <p className="sub">The {L.noun} is only read, never run. Your AI chatbot proposes the steps; the app checks them against your real data.</p>
+          <p className="sub">{language === 'doc'
+            ? 'Your AI chatbot reads the written steps, plus any screenshots or flowcharts, and proposes a workflow; the app checks it against your real data.'
+            : `The ${L.noun} is only read, never run. Your AI chatbot proposes the steps; the app checks them against your real data.`}</p>
         </div>
       </div>
       <div className="steps-indicator">
@@ -227,7 +257,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
           {L.limit && <div className="alert info small">{L.limit}</div>}
           <div className="tabs">
             <button className={tab === 'file' ? 'active' : ''} onClick={() => setTab('file')}>{L.fileTab}</button>
-            <button className={tab === 'paste' ? 'active' : ''} onClick={() => setTab('paste')}>Paste the code</button>
+            <button className={tab === 'paste' ? 'active' : ''} onClick={() => setTab('paste')}>{L.pasteTab}</button>
           </div>
           {tab === 'file' ? (
             <>
@@ -253,7 +283,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
             <>
               <p className="muted small">{L.pasteHelp}</p>
               <textarea className="code" rows={14} value={pasted} onChange={(e) => setPasted(e.target.value)} placeholder={L.placeholder} />
-              <div><button className="primary" disabled={!pasted.trim() || busy} onClick={() => analyse({ code: pasted, name: 'Pasted code' })}>Read {L.noun}</button></div>
+              <div><button className="primary" disabled={!pasted.trim() || busy} onClick={() => analyse({ code: pasted, name: language === 'doc' ? 'Pasted text' : 'Pasted code' })}>Read {L.noun}</button></div>
             </>
           )}
         </div>
@@ -266,23 +296,25 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
               <div className="row" style={{ flexWrap: 'nowrap' }}>
                 <CodeBadge language={language} size={26} small />
                 <div style={{ minWidth: 0 }}>
-                  <b className="ellipsis">{analysis.workbook.name ?? 'Pasted code'}</b>
-                  <div className="faint small">{analysis.modules.length} {L.unit}(s) with code</div>
+                  <b className="ellipsis">{analysis.workbook.name ?? (language === 'doc' ? 'Pasted text' : 'Pasted code')}</b>
+                  <div className="faint small">{language === 'doc'
+                    ? `${analysis.modules[0]?.code.split('\n').length ?? 0} lines · ${figures.length} picture(s)`
+                    : `${analysis.modules.length} ${L.unit}(s) with code`}</div>
                 </div>
               </div>
-              <h3 style={{ marginBottom: 0 }}>{L.unit === 'file' ? 'Code to translate' : 'Modules to translate'}</h3>
+              <h3 style={{ marginBottom: 0 }}>{L.unit === 'document' ? 'Document' : L.unit === 'file' ? 'Code to translate' : 'Modules to translate'}</h3>
               {analysis.modules.map((m) => (
                 <div key={m.name} className={`module-row${viewing === m.name ? ' active' : ''}`} onClick={() => setViewing(m.name)}>
                   <input type="checkbox" checked={!!included[m.name]} onClick={(e) => e.stopPropagation()} onChange={(e) => setIncluded({ ...included, [m.name]: e.target.checked })} aria-label={`Include ${m.name}`} />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div className="mono small" style={{ fontWeight: 600 }}>{m.name}{m.kind !== 'standard' && <span className="faint"> · sheet/class</span>}</div>
+                    <div className="mono small" style={{ fontWeight: 600 }}>{m.name}{m.kind !== 'standard' && m.kind !== 'document' && <span className="faint"> · sheet/class</span>}</div>
                     <div className="faint small ellipsis">{m.procedures.map((p) => p.name).join(', ')}</div>
                   </div>
                 </div>
               ))}
-              <Field label={L.entryLabel} help={language === 'python' ? 'Leave empty if the script runs top to bottom.' : 'The AI follows the procedures it calls.'}>
+              <Field label={L.entryLabel} help={language === 'doc' ? 'Leave empty to translate the whole document.' : language === 'python' ? 'Leave empty if the script runs top to bottom.' : 'The AI follows the procedures it calls.'}>
                 <select value={entry} onChange={(e) => setEntry(e.target.value)}>
-                  <option value="">{language === 'python' ? 'Whole script' : 'Let the AI decide'}</option>
+                  <option value="">{language === 'doc' ? 'Whole document' : language === 'python' ? 'Whole script' : 'Let the AI decide'}</option>
                   {analysis.modules.filter((m) => included[m.name]).flatMap((m) => m.procedures.filter((p) => p.kind === L.entryKind).map((p) => (
                     <option key={`${m.name}.${p.name}`} value={p.name}>{p.name} ({m.name})</option>
                   )))}
@@ -309,6 +341,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
                   </div>
                 </div>
               )}
+              {analysis.warnings?.map((w) => <div key={w} className="alert warn small">{w}</div>)}
               {analysis.actions.length > 0 && (
                 <div className="alert warn small">
                   <b>The {L.noun} also does things a workflow won’t:</b>
@@ -325,20 +358,28 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
                   <>
                     <div className="row between" style={{ padding: '10px 14px', borderBottom: '1px solid var(--line)' }}>
                       <b className="mono">{m.name}</b>
-                      <span className="faint small">{m.code.split('\n').length} lines · highlighted lines use data</span>
+                      <span className="faint small">{m.code.split('\n').length} lines · highlighted lines {language === 'doc' ? 'name files' : 'use data'}</span>
                     </div>
-                    <pre className="code-view">{m.code.split('\n').map((ln, i) => (
-                      <div key={i} className={flagged.has(i + 1) ? 'hl' : ''}><span className="ln">{i + 1}</span>{ln || ' '}</div>
-                    ))}</pre>
+                    <pre className={`code-view${language === 'doc' ? ' wrap' : ''}`}>{m.code.split('\n').map((ln, i) => {
+                      const fig = language === 'doc' ? figureAt.get(i + 1) : undefined
+                      return (
+                        <div key={i} className={flagged.has(i + 1) ? 'hl' : ''}><span className="ln">{i + 1}</span>{ln || ' '}
+                          {fig?.file && <img className="code-fig" src={figureUrl(analysis, fig)} alt={fig.alt || fig.id} loading="lazy" />}
+                        </div>
+                      )
+                    })}</pre>
                   </>
                 )
               })()}
             </div>
           </div>
+          {figures.length > 0 && (
+            <FiguresPanel analysis={analysis} figures={figures} state={figs} onChange={(id, st) => setFigs({ ...figs, [id]: st })} attachedCount={attached.length} />
+          )}
           <div className="row">
             <button onClick={() => setStep(1)}>← Back</button>
             <span className="spacer" />
-            <span className="faint small">{codeChars.toLocaleString()} characters of code selected</span>
+            <span className="faint small">{codeChars.toLocaleString()} characters {language === 'doc' ? 'of text' : 'of code selected'}</span>
             <button className="primary" disabled={modules.length === 0} onClick={() => setStep(3)}>Next: connect its data →</button>
           </div>
         </div>
@@ -351,7 +392,7 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
             Anything marked <b>Missing</b> must be added as a source first.
           </div>
           <div className="card flush">
-            {analysis.dependencies.length === 0 && <div className="empty small">No file or sheet names were found in the code. Add the data the {L.noun} works on below.</div>}
+            {analysis.dependencies.length === 0 && <div className="empty small">No file or sheet names were found in the {language === 'doc' ? 'document' : 'code'}. Add the data the {L.noun} works on below.</div>}
             {analysis.dependencies.map((d) => {
               const key = depKey(d)
               const st = deps[key]
@@ -418,7 +459,13 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
           <div className="card stack">
             <h2>What the AI will receive</h2>
             <ul className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              <li>The code of {modules.length} {L.unit}(s) ({codeChars.toLocaleString()} characters){entry && <>, starting from <b className="mono">{entry}</b></>}</li>
+              {language === 'doc'
+                ? <li>The document text ({codeChars.toLocaleString()} characters){entry && <>, focusing on section <b>{entry}</b></>}</li>
+                : <li>The code of {modules.length} {L.unit}(s) ({codeChars.toLocaleString()} characters){entry && <>, starting from <b className="mono">{entry}</b></>}</li>}
+              {language === 'doc' && figures.length > 0 && (
+                <li>{attached.length} picture(s) for you to attach{described.length > 0 && <>, {described.length} described in words</>}
+                  {figures.length - attached.length - described.length > 0 && <span className="faint">, {figures.length - attached.length - described.length} left out</span>}</li>
+              )}
               <li>For each connected table: column names, Excel column letters, types and counts{samples ? ', plus 5 sample rows' : ' (no values)'}</li>
               {Object.entries(bindings).map(([r, id]) => <li key={r} className="faint"><span className="mono">{r}</span> → {byId[id]?.label}</li>)}
               <li>The list of workflow operations it may use</li>
@@ -431,11 +478,13 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
           <div className="card stack">
             <h2>Next</h2>
             <ol className="small" style={{ margin: 0, paddingLeft: 18 }}>
-              <li>We build a prompt; you copy it into your approved AI chatbot.</li>
+              <li>{language === 'doc' && attached.length > 0
+                ? 'We build a prompt; you copy it into your approved AI chatbot and attach the pictures to the same message.'
+                : 'We build a prompt; you copy it into your approved AI chatbot.'}</li>
               <li>Paste the reply back. The app checks every step against your data.</li>
               <li>Open the result in the Workflow Studio, review each step (they link back to {L.noun} lines), save and run.</li>
             </ol>
-            <label className="check"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this {L.noun} code and data description may be shared with the approved chatbot.</label>
+            <label className="check"><input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} /> I confirm this {language === 'doc' ? `document${attached.length ? ', its pictures' : ''}` : `${L.noun} code`} and data description may be shared with the approved chatbot.</label>
             <div className="row">
               <button onClick={() => setStep(3)}>← Back</button>
               <span className="spacer" />
@@ -457,11 +506,69 @@ export default function MacroImport({ language = 'vba' }: { language?: CodeLangu
   )
 }
 
-/** The file icon with a small language tag, used on the macro and script import tiles. */
+const figureUrl = (a: Analysis, f: Figure) => `/api/figures/${a.figures_key}/${f.file}`
+
+/** Each picture in the document, and how it reaches the chatbot: attached, described in words, or left out. */
+function FiguresPanel({ analysis, figures, state, onChange, attachedCount }: {
+  analysis: Analysis; figures: Figure[]; state: Record<string, FigState>; onChange: (id: string, st: FigState) => void; attachedCount: number
+}) {
+  const kindLabel = (f: Figure) => f.kind === 'page' ? `Page shown as a picture (${f.reason})` : f.kind === 'drawing' ? 'Drawn with Word shapes'
+    : f.kind === 'chart' ? 'Word chart' : `${f.format.toUpperCase() || 'Picture'}${f.width ? ` · ${f.width}×${f.height}` : ''}`
+  return (
+    <div className="card stack">
+      <div className="card-head">
+        <h2>Pictures in the document ({figures.length})</h2>
+        <span className="faint small">{attachedCount} to attach</span>
+      </div>
+      <p className="muted small" style={{ margin: 0 }}>
+        Screenshots and flowcharts often hold the real rules, so your chatbot reads the pictures you attach next to the prompt.
+        Leave out logos and decoration. For a picture you can’t attach, describe what it shows.
+      </p>
+      {attachedCount > MAX_ATTACHED && (
+        <div className="alert warn small">Many chatbots accept only about {MAX_ATTACHED} pictures in one message. Leave out the ones that don’t change the steps, or describe them in words.</div>
+      )}
+      <div className="fig-grid">
+        {figures.map((f) => {
+          const st = state[f.id] ?? { mode: f.mode, description: '' }
+          const set = (mode: FigureMode) => onChange(f.id, { ...st, mode })
+          return (
+            <div key={f.id} className={`fig-card${st.mode === 'skip' ? ' skipped' : ''}`}>
+              <div className="fig-thumb">
+                {f.file
+                  ? <a href={figureUrl(analysis, f)} target="_blank" rel="noopener"><img src={figureUrl(analysis, f)} alt={f.alt || f.id} loading="lazy" /></a>
+                  : <span className="faint small">{f.kind === 'drawing' ? 'No picture: Word shapes' : f.kind === 'chart' ? 'No picture: Word chart' : `Can’t show ${f.format.toUpperCase() || 'this format'}`}</span>}
+              </div>
+              <div className="row between" style={{ flexWrap: 'nowrap' }}>
+                <b>{f.id}</b>
+                <span className="faint small ellipsis">{[f.locator, `line ${f.line}`].filter(Boolean).join(' · ')}{f.lines.length > 1 ? ` · used ${f.lines.length}×` : ''}</span>
+              </div>
+              <div className="faint small">{kindLabel(f)}</div>
+              {f.alt && <div className="small">Alt text: “{f.alt}”</div>}
+              {f.text && <div className="small">Text inside: <span className="muted">{f.text}</span></div>}
+              {f.reason && f.kind !== 'page' && <div className="faint small">{f.reason}</div>}
+              <div className="row" style={{ gap: 12 }}>
+                <label className="check small" title={f.file ? undefined : 'This picture can’t be attached'}>
+                  <input type="radio" checked={st.mode === 'attach'} disabled={!f.file} onChange={() => set('attach')} /> Attach</label>
+                <label className="check small"><input type="radio" checked={st.mode === 'describe'} onChange={() => set('describe')} /> Describe</label>
+                <label className="check small"><input type="radio" checked={st.mode === 'skip'} onChange={() => set('skip')} /> Not needed</label>
+              </div>
+              {st.mode === 'describe' && (
+                <textarea rows={2} value={st.description} onChange={(e) => onChange(f.id, { ...st, description: e.target.value })}
+                  placeholder={f.kind === 'drawing' ? 'How the boxes connect, e.g. “Start → filter Region = Luzon → sum Qty by Branch”' : 'What it shows, e.g. “Pivot: rows Branch, values Sum of Qty”'} />
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+/** The file icon with a small language tag, used on the macro, script and document import tiles. */
 export function CodeBadge({ language, size, small }: { language: CodeLanguage; size: number; small?: boolean }) {
   return (
-    <div className={`macro-badge${small ? ' sm' : ''}${language === 'python' ? ' python' : ''}`}>
-      <FileIcon kind={language === 'python' ? 'code' : 'excel'} ext={language === 'python' ? '.py' : undefined} size={size} />
+    <div className={`macro-badge${small ? ' sm' : ''}${language === 'vba' ? '' : ` ${language}`}`}>
+      <FileIcon kind={language === 'python' ? 'code' : language === 'doc' ? undefined : 'excel'} ext={language === 'python' ? '.py' : language === 'doc' ? '.docx' : undefined} size={size} />
       <span>{LANG[language].badge}</span>
     </div>
   )

@@ -28,7 +28,7 @@ SETTINGS_DEFAULTS = {
     "welcomed": False,     # the first-launch welcome has been answered (folder chosen or skipped)
 }
 BROWSABLE_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".xlsb", ".xls", ".bas", ".cls"} | DOCUMENT_EXTS
-REQUIRED_PACKAGES = ["fastapi", "uvicorn", "pydantic", "pandas", "numpy", "openpyxl", "pypdf", "python-docx", "httpx", "olefile"]
+REQUIRED_PACKAGES = ["fastapi", "uvicorn", "pydantic", "pandas", "numpy", "openpyxl", "pypdf", "pypdfium2", "python-docx", "httpx", "olefile"]
 
 
 @router.get("/health")

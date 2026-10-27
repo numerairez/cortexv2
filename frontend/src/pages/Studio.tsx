@@ -77,7 +77,7 @@ function loadLayout(): Layout {
   try { return { ...DEFAULT_LAYOUT, ...JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? '{}') } } catch { return DEFAULT_LAYOUT }
 }
 type Preview = TransformPreview & { data?: TransformPreview['data'] & { profile: ColumnProfile[] } }
-interface MacroInfo { language: 'vba' | 'python'; not_translated: { macro_lines: string; what_it_does: string; why: string }[]; missing_data: { reference: string; why_needed: string }[] }
+interface MacroInfo { language: 'vba' | 'python' | 'doc'; not_translated: { macro_lines: string; what_it_does: string; why: string }[]; missing_data: { reference: string; why_needed: string }[] }
 interface History { past: Recipe[]; present: Recipe; future: Recipe[] }
 
 const emptyRecipe = (): Recipe => ({ schema_version: 1, inputs: [{ role: 'data' }], base: 'data', steps: [], output: { name: 'result', formats: ['xlsx'] } })
@@ -225,10 +225,10 @@ export default function Studio() {
         if (r) resetRecipe({ ...emptyRecipe(), ...r })
         setBindings((run.config.bindings as Record<string, string>) ?? {})
         if (run.service_id !== 'transformation') setOrigin('ai')
-        if (run.service_id === 'macro_to_workflow' || run.service_id === 'python_to_workflow') {
-          const python = run.service_id === 'python_to_workflow'
-          setMacroInfo({ language: python ? 'python' : 'vba', not_translated: (run.state.not_translated as MacroInfo['not_translated']) ?? [], missing_data: (run.state.missing_data as MacroInfo['missing_data']) ?? [] })
-          setMeta((m) => ({ ...m, name: `${String((run.config.options as Record<string, unknown>)?.macro_name || (python ? 'Script' : 'Macro'))} (workflow)` }))
+        if (run.service_id in SOURCE_TEXT) {
+          const language = SOURCE_TEXT[run.service_id]
+          setMacroInfo({ language, not_translated: (run.state.not_translated as MacroInfo['not_translated']) ?? [], missing_data: (run.state.missing_data as MacroInfo['missing_data']) ?? [] })
+          setMeta((m) => ({ ...m, name: `${String((run.config.options as Record<string, unknown>)?.macro_name || SOURCE_LABEL[language].Noun)} (workflow)` }))
         }
       }).catch((e: Error) => toast(e.message, true)).finally(done)
     } else if (collectionId) {
@@ -965,7 +965,7 @@ export default function Studio() {
                   </div>
                 </div>
                 {g.inputs && g.inputs.length > 0 && <div className="faint small">Also includes the own steps of: {g.inputs.join(', ')}</div>}
-                {g.source?.macro_name && <div className="faint small">From {g.source.language === 'python' ? 'script' : 'macro'} <b>{g.source.macro_name}</b>{g.source.modules ? ` (${g.source.modules})` : ''}</div>}
+                {g.source?.macro_name && <div className="faint small">From {(SOURCE_LABEL[g.source.language as MacroInfo['language']] ?? SOURCE_LABEL.vba).noun} <b>{g.source.macro_name}</b>{g.source.modules ? ` (${g.source.modules})` : ''}</div>}
                 <div className="row">
                   <button onClick={() => toggleGroup(g.id)}>{open ? '▸ Collapse' : '▾ Expand'}</button>
                   <button onClick={() => ungroup(g.id)} title="Keep the steps, remove the grouping">Ungroup</button>
@@ -1073,15 +1073,21 @@ export default function Studio() {
 }
 
 /** Notes the AI translation puts on each step, pointing back to the macro or script lines. */
-const isCodeNote = (note: unknown) => typeof note === 'string' && /^From (macro|code) /.test(note)
-const translatedLabel = (g: StepGroup) => g.source?.language === 'python' ? 'Translated Python script' : 'Translated Excel macro'
+const isCodeNote = (note: unknown) => typeof note === 'string' && /^From (macro|code|document) /.test(note)
+const SOURCE_TEXT: Record<string, MacroInfo['language']> = { macro_to_workflow: 'vba', python_to_workflow: 'python', doc_to_workflow: 'doc' }
+const SOURCE_LABEL: Record<MacroInfo['language'], { noun: string; Noun: string; translated: string; from: string }> = {
+  vba: { noun: 'macro', Noun: 'Macro', translated: 'Translated Excel macro', from: 'an Excel macro' },
+  python: { noun: 'script', Noun: 'Script', translated: 'Translated Python script', from: 'a Python script' },
+  doc: { noun: 'procedure', Noun: 'Procedure', translated: 'Translated process document', from: 'a process document' },
+}
+const translatedLabel = (g: StepGroup) => (SOURCE_LABEL[g.source?.language as MacroInfo['language']] ?? SOURCE_LABEL.vba).translated
 
 function MacroBanner({ info, onAddData }: { info: MacroInfo; onAddData: () => void }) {
-  const noun = info.language === 'python' ? 'script' : 'macro'
+  const { noun, from } = SOURCE_LABEL[info.language]
   return (
     <details className="alert info prep-banner" open={info.missing_data.length > 0}>
       <summary style={{ cursor: 'pointer' }}>
-        <b>Translated from {info.language === 'python' ? 'a Python script' : 'an Excel macro'}.</b> Click each step to see which {noun} lines it comes from.
+        <b>Translated from {from}.</b> Click each step to see which {noun} lines it comes from.
         {info.not_translated.length > 0 && <> · {info.not_translated.length} part(s) not translated</>}
         {info.missing_data.length > 0 && <> · <span style={{ color: 'var(--bad)' }}>{info.missing_data.length} dataset(s) missing</span></>}
       </summary>

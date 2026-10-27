@@ -25,6 +25,7 @@ export default function Workflows() {
     const f = files[0]
     if (/\.(xlsb|xls|bas|cls)$/i.test(f.name)) { nav('/workflows/from-macro', { state: { file: f } }); return }
     if (/\.(py|ipynb)$/i.test(f.name)) { nav('/workflows/from-python', { state: { file: f } }); return }
+    if (/\.(docx|pdf)$/i.test(f.name)) { nav('/workflows/from-document', { state: { file: f } }); return }
     setBusy(true)
     try {
       const r = await uploadFile<UploadResult>(f)
@@ -71,6 +72,12 @@ export default function Workflows() {
             <h2>Turn a Python script into a workflow</h2>
             <p>Same for pandas scripts and notebooks: the code is read, never run, and translated into steps you can see and check.</p>
             <span className="btn">Import a script →</span>
+          </Link>
+          <Link to="/workflows/from-document" className="start-tile">
+            <CodeBadge language="doc" size={34} />
+            <h2>Turn a process document into a workflow</h2>
+            <p>Have the steps written down in Word or PDF? Your AI chatbot reads the text, and any screenshots or flowcharts in it, and turns them into steps you can see and check.</p>
+            <span className="btn">Import a document →</span>
           </Link>
         </div>
       </div>

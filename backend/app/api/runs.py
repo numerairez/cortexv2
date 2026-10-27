@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import mimetypes
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
-from ..connectors import tabular
+from ..connectors import procdoc, tabular
+from ..connectors.vba import VBAError
 from ..core import context, recipes, runs
 from ..core.sources import SourceError
 from ..services import base, transformation
@@ -66,7 +69,7 @@ class AIPreviewBody(BaseModel):
 
 @router.get("/services")
 def list_services():
-    return [s.describe() for s in base.all_services() if s.id not in ("transformation_ai", "macro_to_workflow", "python_to_workflow")]
+    return [s.describe() for s in base.all_services() if s.id not in ("transformation_ai", "macro_to_workflow", "python_to_workflow", "doc_to_workflow")]
 
 
 @router.get("/services/{service_id}")
@@ -113,6 +116,26 @@ def start_run(body: StartRun):
     run = runs.update_run(run["id"], status="awaiting_response", state=state,
                           exchanges=runs.record_exchange(run, "prompt", prompt))
     return _public_run(run)
+
+
+@router.get("/runs/{run_id}/figures.zip")
+def run_figures(run_id: str):
+    """The pictures a document → workflow prompt asks the user to attach, in one download."""
+    run = runs.get_run(run_id)
+    opts = run["config"].get("options") or {}
+    key = opts.get("figures_key")
+    files = [f["file"] for f in opts.get("figures") or [] if f.get("mode") == "attach" and f.get("file")]
+    if not key or not files:
+        raise SourceError("This run has no pictures to attach", 404)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_STORED) as z:   # PNG and JPEG are already compressed
+        for f in files:
+            try:
+                z.write(procdoc.figure_path(key, f), f)
+            except VBAError:
+                pass
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="figures-{run_id[:8]}.zip"'})
 
 
 @router.get("/runs")

@@ -446,6 +446,7 @@ button.setup-btn:hover:not(:disabled) { background: var(--warn); color: var(--su
 .macro-badge span { position: absolute; right: -14px; bottom: -4px; background: #7b5cd6; color: #fff; font-size: 10px; font-weight: 800; padding: 1px 4px; border-radius: 4px; border: 2px solid var(--surface); }
 .macro-badge.sm { margin-right: 14px; }
 .macro-badge.python span { background: #3572a5; right: -10px; }
+.macro-badge.doc span { background: #2b5cb8; right: -16px; }
 .macro-badge.sm span { font-size: 9px; right: -12px; }
 .wf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
 .wf-card { display: flex; flex-direction: column; gap: 10px; }
@@ -488,6 +489,17 @@ button.setup-btn:hover:not(:disabled) { background: var(--warn); color: var(--su
 pre.code-view { margin: 0; max-height: 560px; overflow: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.5; padding: 8px 0; }
 pre.code-view div { padding: 0 14px 0 0; white-space: pre; }
 pre.code-view div.hl { background: var(--warn-soft); }
+pre.code-view.wrap div { white-space: pre-wrap; overflow-wrap: anywhere; padding-left: 48px; text-indent: -48px; }
+pre.code-view.wrap .ln { text-indent: 0; }
+pre.code-view img.code-fig { display: block; max-width: min(420px, 100%); max-height: 260px; margin: 4px 0 8px; border: 1px solid var(--line); border-radius: 4px; text-indent: 0; }
+.fig-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.fig-card { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 8px; padding: 10px; min-width: 0; }
+.fig-card.skipped { opacity: .55; }
+.fig-thumb { display: grid; place-items: center; height: 150px; background: var(--surface-2); border-radius: 6px; overflow: hidden; text-align: center; padding: 6px; }
+.fig-thumb img { max-width: 100%; max-height: 138px; object-fit: contain; display: block; }
+.fig-strip { display: flex; gap: 8px; flex-wrap: wrap; }
+.fig-strip a { display: flex; flex-direction: column; align-items: center; gap: 2px; text-decoration: none; color: var(--muted); font-size: 11.5px; }
+.fig-strip img { width: 84px; height: 64px; object-fit: contain; background: var(--surface); border: 1px solid var(--line); border-radius: 4px; }
 pre.code-view .ln { display: inline-block; width: 48px; padding-right: 12px; text-align: right; color: var(--faint); user-select: none; }
 .dep-row { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
 .dep-row:last-child { border-bottom: 0; }

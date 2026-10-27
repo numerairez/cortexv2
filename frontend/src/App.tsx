@@ -86,6 +86,7 @@ export default function App() {
           <Route path="/" element={<Workflows />} />
           <Route path="/workflows/from-macro" element={<MacroImport />} />
           <Route path="/workflows/from-python" element={<MacroImport key="python" language="python" />} />
+          <Route path="/workflows/from-document" element={<MacroImport key="doc" language="doc" />} />
           <Route path="/workflows/:id" element={<Studio />} />
           <Route path="/dashboards" element={<Dashboards />} />
           <Route path="/dashboards/:id" element={<DashboardEditor />} />

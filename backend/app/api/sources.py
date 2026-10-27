@@ -9,10 +9,11 @@ from typing import Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..config import get_paths
-from ..connectors import feeds, pycode, vba
+from ..connectors import feeds, procdoc, pycode, vba
 from ..core import collections, context, runs, sources, templates
 from ..services import prompting
 from ..storage import db
@@ -272,7 +273,7 @@ class MacroBody(BaseModel):
     path: str | None = None
     code: str | None = Field(default=None, max_length=500_000)
     name: str | None = None
-    language: Literal["vba", "python"] = "vba"
+    language: Literal["vba", "python", "doc"] = "vba"
 
 
 @router.post("/macros/analyse")
@@ -284,13 +285,24 @@ def analyse_macro(body: MacroBody):
             raise sources.SourceError("File not found", 404)
     try:
         python = body.language == "python" or (path is not None and path.suffix.lower() in pycode.SCRIPT_EXTS)
-        result = (pycode if python else vba).load(path=path, code=body.code, name=body.name)
+        reader = procdoc if body.language == "doc" else pycode if python else vba
+        result = reader.load(path=path, code=body.code, name=body.name)
     except vba.VBAError as e:
         raise sources.SourceError(str(e))
     if path is not None:
         src = db.query_one("SELECT id FROM sources WHERE location = ? AND deleted_at IS NULL", (str(path.resolve()),))
         result["workbook"]["source_id"] = src["id"] if src else None
     return result
+
+
+@router.get("/figures/{key}/{file}")
+def figure(key: str, file: str):
+    """A picture taken from a procedure document, to show and to attach to the chatbot message."""
+    try:
+        path = procdoc.figure_path(key, file)
+    except vba.VBAError as e:
+        raise sources.SourceError(str(e), 404)
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=86400"})
 
 
 # ---- data templates

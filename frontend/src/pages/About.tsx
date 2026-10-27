@@ -30,6 +30,12 @@ const FEATURES = [
     to: '/workflows/from-python', cta: 'Import a script',
   },
   {
+    icon: <CodeBadge language="doc" size={26} small />,
+    title: 'Process documents → workflows',
+    text: 'Import a written procedure (Word or PDF). Your approved AI chatbot turns the steps into a workflow you can check; any screenshots or flowcharts are picked out for you to attach.',
+    to: '/workflows/from-document', cta: 'Import a document',
+  },
+  {
     icon: <span className="tpl-icon"><FileIcon kind="excel" size={26} /><span>📅</span></span>,
     title: 'Data templates',
     text: 'Point at files that arrive every month (sales_2026_01.xlsx, sales_2026_02.xlsx …) and pick which period to use each time you run.',
@@ -72,6 +78,7 @@ const LIBRARIES: { name: string; pkg?: string; license: string; role: string }[]
   { name: 'NumPy', pkg: 'numpy', license: 'BSD-3-Clause', role: 'numbers' },
   { name: 'openpyxl', pkg: 'openpyxl', license: 'MIT', role: 'reads and writes Excel' },
   { name: 'pypdf', pkg: 'pypdf', license: 'BSD-3-Clause', role: 'reads PDFs' },
+  { name: 'pypdfium2', pkg: 'pypdfium2', license: 'Apache-2.0 / BSD-3-Clause', role: 'shows PDF pages as pictures' },
   { name: 'python-docx', pkg: 'python-docx', license: 'MIT', role: 'reads Word documents' },
   { name: 'HTTPX', pkg: 'httpx', license: 'BSD-3-Clause', role: 'Confluence connection' },
   { name: 'olefile', pkg: 'olefile', license: 'BSD-2-Clause', role: 'reads Excel macro storage' },

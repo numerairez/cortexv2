@@ -13,6 +13,15 @@ const SERVICE_NAMES: Record<string, string> = {
   transformation_ai: 'AI-drafted workflow',
   macro_to_workflow: 'Excel macro → workflow',
   python_to_workflow: 'Python script → workflow',
+  doc_to_workflow: 'Process document → workflow',
+}
+const RECIPE_SERVICES = ['transformation_ai', 'macro_to_workflow', 'python_to_workflow', 'doc_to_workflow']
+const SOURCE_NOUN: Record<string, string> = { python_to_workflow: 'script', doc_to_workflow: 'procedure' }
+
+/** Pictures a document → workflow prompt asks the user to attach next to it. */
+function attachedFigures(run: Run): { id: string; file: string; alt: string }[] {
+  const opts = (run.config.options ?? {}) as { figures?: { id: string; file: string | null; alt: string; mode: string }[] }
+  return (opts.figures ?? []).filter((f) => f.mode === 'attach' && f.file).map((f) => ({ id: f.id, file: f.file!, alt: f.alt }))
 }
 
 export default function RunWorkspace() {
@@ -80,6 +89,7 @@ export default function RunWorkspace() {
             {run.state.prompt ? (
               <>
                 <p className="muted small">About {run.state.estimated_tokens?.toLocaleString()} tokens. Paste it into your approved chatbot as a new conversation.</p>
+                <FiguresToAttach run={run} />
                 <pre className="prompt">{run.state.prompt}</pre>
               </>
             ) : <p className="muted">The prompt was not retained (see Settings → Data handling).</p>}
@@ -111,7 +121,7 @@ export default function RunWorkspace() {
       )}
 
       {run.status === 'completed' && run.service_id === 'knowledge_base' && <KnowledgeBaseResult run={run} />}
-      {run.status === 'completed' && ['transformation_ai', 'macro_to_workflow', 'python_to_workflow'].includes(run.service_id) && <RecipeDraftResult run={run} />}
+      {run.status === 'completed' && RECIPE_SERVICES.includes(run.service_id) && <RecipeDraftResult run={run} />}
       {run.service_id === 'transformation' && <TransformationResult run={run} />}
 
       {run.status === 'completed' && isAI && (run.state.warnings?.length ?? 0) > 0 && (
@@ -179,12 +189,34 @@ function Stat({ label, value, tone }: { label: string; value: number | undefined
   )
 }
 
+function FiguresToAttach({ run }: { run: Run }) {
+  const figures = attachedFigures(run)
+  const key = (run.config.options as { figures_key?: string } | undefined)?.figures_key
+  if (!figures.length || !key) return null
+  return (
+    <div className="alert info small stack">
+      <div><b>Attach {figures.length === 1 ? 'this picture' : `these ${figures.length} pictures`} to the same message.</b> {figures.length === 1
+        ? 'Drag it into the chat, or download it and attach the file.'
+        : 'Drag them into the chat, or download them and attach the files.'} The prompt refers to each by its file name.</div>
+      <div className="fig-strip">
+        {figures.map((f) => (
+          <a key={f.file} href={`/api/figures/${key}/${f.file}`} download={f.file} title={f.alt || f.id}>
+            <img src={`/api/figures/${key}/${f.file}`} alt={f.alt || f.id} />
+            <span className="mono">{f.file}</span>
+          </a>
+        ))}
+      </div>
+      <div><a className="btn sm" href={`/api/runs/${run.id}/figures.zip`}>Download all pictures (.zip)</a></div>
+    </div>
+  )
+}
+
 function RecipeDraftResult({ run }: { run: Run }) {
   const recipe = run.state.recipe
   if (!recipe) return null
   const notTranslated = (run.state.not_translated as { macro_lines: string; what_it_does: string; why: string }[] | undefined) ?? []
   const missing = (run.state.missing_data as { reference: string; why_needed: string }[] | undefined) ?? []
-  const noun = run.service_id === 'python_to_workflow' ? 'script' : 'macro'
+  const noun = SOURCE_NOUN[run.service_id] ?? 'macro'
   return (
     <div className="card">
       <div className="card-head">
