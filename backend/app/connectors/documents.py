@@ -7,6 +7,7 @@ so prompts can cite exactly where a passage came from.
 from __future__ import annotations
 
 import hashlib
+import os
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
@@ -27,18 +28,32 @@ class Segment:
     text: str
 
 
+# Content hashes of files already read, by path, size and timestamps. Dashboards and workflows look
+# their file up on every request, and hashing a 200 MB file costs a full read of it, slowest when
+# it sits on a network drive. Any write changes the size or a timestamp, so a hit is never stale.
+_hashes: dict[tuple, str] = {}
+MAX_REMEMBERED_HASHES = 512
+
+
 def fingerprint_file(path: Path) -> dict:
-    h = hashlib.sha256()
     try:
-        with path.open("rb") as f:
-            for chunk in iter(lambda: f.read(1 << 20), b""):
-                h.update(chunk)
         st = path.stat()
+        key = (os.path.abspath(path), st.st_size, st.st_mtime_ns, st.st_ctime_ns, st.st_ino)
+        digest = _hashes.get(key)
+        if digest is None:
+            h = hashlib.sha256()
+            with path.open("rb") as f:
+                for chunk in iter(lambda: f.read(1 << 20), b""):
+                    h.update(chunk)
+            digest = h.hexdigest()
+            if len(_hashes) >= MAX_REMEMBERED_HASHES:
+                _hashes.clear()
+            _hashes[key] = digest
     except FileNotFoundError:
         raise DocumentError("File not found")
     except PermissionError:
         raise DocumentError("Permission denied (the file may be open in another program)")
-    return {"sha256": h.hexdigest(), "size": st.st_size, "mtime": st.st_mtime}
+    return {"sha256": digest, "size": st.st_size, "mtime": st.st_mtime}
 
 
 def extract_segments(path: Path) -> list[Segment]:

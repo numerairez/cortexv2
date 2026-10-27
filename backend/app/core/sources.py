@@ -431,7 +431,7 @@ def check_selection(selection_id: str) -> dict:
             return {**result, "status": "error", "detail": "Permission denied (file may be open/locked)"}
         cols = sel["config"].get("columns")
         current = tabular.schema_of(t.df[cols] if cols and all(c in t.df.columns for c in cols) else t.df)
-        drift = tabular.schema_drift(sel["schema"], current)
+        drift = tabular.schema_drift(sel["schema"], current, tabular.is_csv(path))
         if cols and any(c not in t.df.columns for c in cols):
             drift = drift or {"missing": [], "added": [], "type_changes": []}
             drift["missing"] = sorted(set(drift["missing"]) | {c for c in cols if c not in t.df.columns})

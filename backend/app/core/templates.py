@@ -228,7 +228,7 @@ def resolve(binding: str) -> dict[str, Any]:
 
 
 def check_schema(tpl: dict, df) -> str | None:
-    drift = tabular.schema_drift(tpl.get("schema"), tabular.schema_of(df))
+    drift = tabular.schema_drift(tpl.get("schema"), tabular.schema_of(df), tabular.is_csv(tpl["pattern"]))
     if not drift:
         return None
     parts = []

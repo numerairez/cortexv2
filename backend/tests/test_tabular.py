@@ -133,3 +133,93 @@ def test_sheet_with_error_cells_is_read_with_openpyxl(tmp_path, monkeypatch):
     assert tabular._sheet_has_errors(broken, "Data")
     rows = dict(tabular.iter_physical_rows(broken, "Data"))
     assert rows[5][2] == "#N/A"   # kept visible, not read as a blank
+
+
+def _csv(tmp_path, text, name="data.csv"):
+    p = tmp_path / name
+    p.write_text(text, encoding="utf-8")
+    return p
+
+
+def test_csv_columns_are_typed_only_when_unambiguous(tmp_path):
+    p = _csv(tmp_path, "\n".join([
+        "Qty,Price,Code,Account,When,Stamp,Local date,Flag,Mixed,Spaced",
+        "2,1.50,00123,1234567890123456,2026-01-03,2026-01-03 09:15:00,03/01/2026,TRUE,7,  12 ",
+        "3,2,00456,1234567890123457,2026-02-01,2026-02-01T10:30,04/01/2026,false,n/a,3",
+        ",-0.25,,,,,,,,",
+    ]) + "\n")
+    df = tabular.load_table(p, tabular.CSV_SHEET, 1).df
+    types = {c["name"]: c["type"] for c in tabular.schema_of(df)}
+    assert types == {"Qty": "integer", "Price": "number", "Code": "text", "Account": "text", "When": "date",
+                     "Stamp": "date", "Local date": "text", "Flag": "boolean", "Mixed": "text", "Spaced": "integer"}
+    assert tabular.column_values(df["Qty"]) == [2, 3, None]
+    assert tabular.column_values(df["Price"]) == [1.5, 2.0, -0.25]
+    assert list(df["Code"]) == ["00123", "00456", None]
+    assert tabular.column_values(df["Stamp"]) == ["2026-01-03T09:15:00", "2026-02-01T10:30:00", None]
+    assert tabular.column_values(df["Flag"]) == [True, False, None]
+
+
+def test_csv_fast_reader_matches_row_by_row_reader(tmp_path, monkeypatch):
+    """The pandas reader gives what the csv module gives: same physical rows, cleaning and warnings."""
+    files = [
+        (_csv(tmp_path, "Report,,\nGenerated today,,\n,,\nRegion,Target,Note\n Luzon , 100 ,\"a, b\"\n,,\n"
+                        "Visayas,50,\"line one\nline two\"\n,,\nMindanao,  ,\"  \"\n,,\n,,\n", "titled.csv"), 4),
+        (_csv(tmp_path, "a;b;;d\n1;x;;\n2;y;;4\n", "semicolon.csv"), 1),
+        (_csv(tmp_path, "Name\tAmount\nx\t1\ny\t\n", "tabs.tsv"), 1),
+        (_csv(tmp_path, "Name,Name,\n1,2,3\n", "dupes.csv"), 1),
+        (_csv(tmp_path, "Name,Amount\n", "header_only.csv"), 1),
+    ]
+    for path, header in files:
+        fast = tabular.load_table(path, tabular.CSV_SHEET, header)
+        fast_head = tabular.load_table(path, tabular.CSV_SHEET, header, max_rows=1)
+        with monkeypatch.context() as m:
+            m.setattr(tabular, "_csv_grid", lambda *a: None)
+            slow = tabular.load_table(path, tabular.CSV_SHEET, header)
+            slow_head = tabular.load_table(path, tabular.CSV_SHEET, header, max_rows=1)
+        for a, b in ((fast, slow), (fast_head, slow_head)):
+            assert a.df.equals(b.df) and list(a.df.dtypes) == list(b.df.dtypes), path.name
+            assert a.warnings == b.warnings and a.letters == b.letters and a.original_headers == b.original_headers
+
+    t = tabular.load_table(files[0][0], tabular.CSV_SHEET, 4)
+    assert list(t.df["Region"]) == ["Luzon", "Visayas", "Mindanao"]
+    assert tabular.column_values(t.df["Target"]) == [100, 50, None]
+    assert list(t.df["Note"]) == ["a, b", "line one\nline two", None]
+    assert "2 blank row(s) inside the table were removed" in t.warnings
+
+
+def test_csv_with_rows_wider_than_the_first_is_read_row_by_row(tmp_path):
+    p = _csv(tmp_path, "Sales export\nRegion,Target\nLuzon,100\n")
+    assert tabular._csv_grid(p, 2, None) is None
+    df = tabular.load_table(p, tabular.CSV_SHEET, 2).df
+    assert list(df["Region"]) == ["Luzon"] and tabular.column_type(df["Target"]) == "integer"
+
+
+def test_csv_padding_check_sees_whitespace_beside_delimiters_quotes_and_line_ends():
+    assert not tabular._has_padded_cells(b"a,b c\n1,two words\r\n", ",")
+    for raw in (b" a,b\n", b"a ,b\n", b"a, b\n", b"a,b \n", b"a,b \r\n", b'a," b"\n', b"a,b\n \n", b"a,b "):
+        assert tabular._has_padded_cells(raw, ","), raw
+    assert not tabular._has_padded_cells(b"a\t\tb\n", "\t")
+
+
+def test_csv_schema_saved_as_text_does_not_drift_once_typed():
+    saved = [{"name": "Qty", "type": "text"}, {"name": "When", "type": "text"}, {"name": "Code", "type": "integer"}]
+    now = [{"name": "Qty", "type": "integer"}, {"name": "When", "type": "date"}, {"name": "Code", "type": "text"}]
+    assert tabular.schema_drift(saved, now, from_csv=True)["type_changes"] == [{"name": "Code", "was": "integer", "now": "text"}]
+    assert len(tabular.schema_drift(saved, now)["type_changes"]) == 3
+
+
+def test_file_hash_is_remembered_until_the_file_changes(tmp_path, monkeypatch):
+    import os
+
+    from app.connectors import documents
+
+    p = _csv(tmp_path, "a\n1\n")
+    first = documents.fingerprint_file(p)["sha256"]
+    opened = []
+    real_open = type(p).open
+    monkeypatch.setattr(type(p), "open", lambda self, *a, **k: opened.append(self) or real_open(self, *a, **k))
+    assert documents.fingerprint_file(p)["sha256"] == first and not opened
+    p.write_text("a\n2\n", encoding="utf-8")   # same size
+    st = p.stat()
+    os.utime(p, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))
+    assert documents.fingerprint_file(p)["sha256"] != first and opened

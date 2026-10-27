@@ -16,6 +16,7 @@ from __future__ import annotations
 import csv
 import datetime as dt
 import io
+import re
 import xml.etree.ElementTree as ET
 import zipfile
 from dataclasses import dataclass, field, replace
@@ -140,13 +141,68 @@ def list_sheets(path: Path) -> list[str]:
 
 
 def _read_csv_text(path: Path) -> str:
-    raw = path.read_bytes()
+    return _decode_csv(path.read_bytes())[0]
+
+
+def _decode_csv(raw: bytes) -> tuple[str, str]:
+    """The text and the encoding it was decoded with."""
     for enc in ("utf-8-sig", "cp1252", "latin-1"):
         try:
-            return raw.decode(enc)
+            return raw.decode(enc), enc
         except UnicodeDecodeError:
             continue
     raise TabularError("Could not decode CSV text")
+
+
+def _csv_delimiter(path: Path, text: str) -> str:
+    if path.suffix.lower() == ".tsv":
+        return "\t"
+    try:
+        return csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
+    except csv.Error:
+        return ","
+
+
+def _csv_grid(path: Path, start_row: int, max_rows: int | None) -> pd.DataFrame | None:
+    """CSV rows from 1-based ``start_row`` as an object frame, cells cleaned as ``_clean_cell`` does.
+    Read with pandas' C parser, several times faster than the csv module on large files; rows are
+    counted as the csv module counts them, so physical row numbers agree. None when a row is wider
+    than the first one read, which the C parser rejects: the caller then reads row by row."""
+    raw = path.read_bytes()
+    text, encoding = _decode_csv(raw)
+    delim = _csv_delimiter(path, text)
+    del text
+    try:
+        grid = pd.read_csv(io.BytesIO(raw), encoding=encoding, sep=delim, header=None, dtype=object,
+                           keep_default_na=False, na_values=[""], skip_blank_lines=False, engine="c",
+                           nrows=start_row - 1 + max_rows if max_rows else None)
+    except pd.errors.EmptyDataError:
+        return pd.DataFrame(dtype=object)
+    except pd.errors.ParserError:
+        return None
+    grid = grid.iloc[start_row - 1:].reset_index(drop=True)
+    if _has_padded_cells(raw, delim):
+        for c in grid.columns:
+            if grid[c].notna().any():
+                s = grid[c].str.strip()
+                grid[c] = s.where(s != "", None)
+    return grid
+
+
+def _has_padded_cells(raw: bytes, delim: str) -> bool:
+    """Whether a space or tab sits next to a delimiter, quote or line break anywhere in the file;
+    if not, no cell has whitespace to strip, and stripping (a Python call per cell) is skipped.
+    Scanned as bytes, which every encoding we decode agrees on for these characters."""
+    space = [32] if delim == "\t" else [32, 9]
+    edge = [ord(delim), 34, 10, 13]
+    chunk = 1 << 24
+    for start in range(0, len(raw), chunk):
+        # One byte of overlap, so a pair split across chunks is still seen.
+        a = np.frombuffer(raw, np.uint8, count=min(chunk + 1, len(raw) - start), offset=start)
+        ws, ed = np.isin(a, space), np.isin(a, edge)
+        if (ws[1:] & ed[:-1]).any() or (ws[:-1] & ed[1:]).any() or (start == 0 and ws[0]):
+            return True
+    return bool(raw) and raw[-1] in space
 
 
 def _clean_cell(v: Any) -> Any:
@@ -179,13 +235,7 @@ def iter_physical_rows(path: Path, sheet: str, start_row: int = 1, max_rows: int
             wb.close()
     elif ext in CSV_EXTS:
         text = _read_csv_text(path)
-        delim = "\t" if ext == ".tsv" else None
-        if delim is None:
-            try:
-                delim = csv.Sniffer().sniff(text[:4096], delimiters=",;\t|").delimiter
-            except csv.Error:
-                delim = ","
-        reader = csv.reader(io.StringIO(text), delimiter=delim)
+        reader = csv.reader(io.StringIO(text), delimiter=_csv_delimiter(path, text))
         for n, row in enumerate(reader, start=1):
             if n < start_row:
                 continue
@@ -274,25 +324,29 @@ def load_table(path: Path, sheet: str, header_row: int = 1, columns: list[str] |
     if header_row < 1:
         raise TabularError("Header row must be 1 or greater (Excel row numbers start at 1)")
     warnings: list[str] = []
-    it = iter_physical_rows(path, sheet, start_row=header_row, max_rows=(max_rows + 1) if max_rows else None)
-    try:
-        _, header = next(it)
-    except StopIteration:
+    csv_file = is_csv(path)
+    limit = (max_rows + 1) if max_rows else None
+    grid = _csv_grid(path, header_row, limit) if csv_file else None
+    if grid is None:
+        # Shorter rows are padded with None.
+        grid = pd.DataFrame([vals for _, vals in iter_physical_rows(path, sheet, header_row, limit)], dtype=object)
+    if not len(grid.index):
         raise TabularError(f"Row {header_row} is beyond the end of the sheet")
 
-    body = [vals for _, vals in it]
+    header = [None if _isna(v) else v for v in grid.iloc[0].tolist()]
+    body = grid.iloc[1:]
+    filled = body.notna().to_numpy()
     # Drop trailing fully-empty rows.
-    while body and all(v is None for v in body[-1]):
-        body.pop()
-    width = max([len(_trim(header))] + [len(_trim(r)) for r in body] or [0])
-    header = (header + [None] * width)[:width]
+    used = np.flatnonzero(filled.any(axis=1))
+    end = used[-1] + 1 if len(used) else 0
+    body, filled = body.iloc[:end], filled[:end]
+    has_data = filled.any(axis=0)
 
     names: list[str] = []
     seen: dict[str, int] = {}
     keep: list[int] = []
     for i, h in enumerate(header):
-        col_has_data = any(i < len(r) and r[i] is not None for r in body)
-        if h is None and not col_has_data:
+        if h is None and not has_data[i]:
             continue
         name = str(h).strip() if h is not None else ""
         if isinstance(h, (dt.datetime, dt.date)):
@@ -310,13 +364,13 @@ def load_table(path: Path, sheet: str, header_row: int = 1, columns: list[str] |
         names.append(name)
         keep.append(i)
 
-    data = [[(r[i] if i < len(r) else None) for i in keep] for r in body]
-    blank_rows = sum(1 for r in data if all(v is None for v in r))
-    if blank_rows:
-        warnings.append(f"{blank_rows} blank row(s) inside the table were removed")
-        data = [r for r in data if not all(v is None for v in r)]
-    df = pd.DataFrame(data, columns=names, dtype=object)
-    df = normalise_types(df)
+    data = body.iloc[:, keep]
+    blank = ~filled[:, keep].any(axis=1)
+    if blank.any():
+        warnings.append(f"{int(blank.sum())} blank row(s) inside the table were removed")
+        data = data[~blank]
+    df = data.set_axis(names, axis=1).reset_index(drop=True)
+    df = type_csv_columns(df) if csv_file else normalise_types(df)
 
     letters = {n: column_letter(i + 1) for n, i in zip(names, keep)}
     t = LoadedTable(df=df, warnings=warnings, header_row=header_row, first_data_row=header_row + 1,
@@ -354,6 +408,50 @@ def normalise_types(df: pd.DataFrame) -> pd.DataFrame:
         else:
             out[col] = s.map(lambda v: None if v is None else (v if isinstance(v, str) else _jsonable(v))).astype(object)
     return pd.DataFrame(out, index=df.index)
+
+
+# What a CSV cell must look like to be read as a number, date or true/false. Numbers are plain:
+# no thousands separators, and no leading zeros, so codes like 00123 stay text; whole parts of at
+# most 15 digits, so long IDs stay text rather than losing digits as JavaScript numbers in charts.
+# Dates are ISO only: 03/04/2026 could be either month order.
+_CSV_NUMBER = r"-?(?:(?:0|[1-9]\d{0,14})(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d{1,3})?"
+_CSV_DATE = r"\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?)?"
+_CSV_BOOL = {"true": True, "false": False}
+
+
+def type_csv_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Type a CSV's text columns as numbers, dates or true/false when every non-blank value is
+    written as one, mirroring what a workbook's cells give ``normalise_types``. Each check runs
+    on a column's distinct values, so repeated categories cost one test each."""
+    out = {}
+    for col in df.columns:
+        s = df[col]
+        blank = s.isna()
+        values = pd.Series(pd.unique(s[~blank].to_numpy()), dtype=object)
+        if values.empty:
+            out[col] = s
+        elif _all_match(_CSV_NUMBER, values):
+            num = pd.to_numeric(s.astype(object))
+            vals = num.dropna()
+            if (vals.abs() < 2**53).all() and (vals == np.floor(vals)).all():
+                num = num.astype("Int64")
+            out[col] = num
+        elif len(values) <= 8 and values.str.lower().isin(_CSV_BOOL).all():
+            out[col] = s.str.lower().map(_CSV_BOOL).astype("boolean")
+        elif _all_match(_CSV_DATE, values) and pd.to_datetime(values, format="ISO8601", errors="coerce").notna().all():
+            out[col] = pd.to_datetime(s, format="ISO8601")
+        else:
+            out[col] = s.where(~blank, None) if blank.any() else s
+    return pd.DataFrame(out, index=df.index)
+
+
+def _all_match(pattern: str, values: pd.Series) -> bool:
+    """Whether every value matches ``pattern`` in full: one regex run over the values joined by
+    line breaks, many times quicker than a match per value."""
+    joined = "\n".join(values)
+    if joined.count("\n") != len(values) - 1:   # a value holds a line break, which no pattern allows
+        return False
+    return re.fullmatch(f"(?:{pattern})(?:\n(?:{pattern}))*", joined) is not None
 
 
 def column_type(s: pd.Series) -> str:
@@ -396,8 +494,15 @@ def schema_of(df: pd.DataFrame) -> list[dict]:
     return [{"name": str(c), "type": column_type(df[c])} for c in df.columns]
 
 
-def schema_drift(saved: list[dict] | None, current: list[dict]) -> dict | None:
-    """Compare a saved schema with the current one; None means no drift."""
+def is_csv(path: Path | str) -> bool:
+    return Path(path).suffix.lower() in CSV_EXTS
+
+
+def schema_drift(saved: list[dict] | None, current: list[dict], from_csv: bool = False) -> dict | None:
+    """Compare a saved schema with the current one; None means no drift.
+
+    ``from_csv``: CSV columns were all read as text before ``type_csv_columns``, so a schema saved
+    then shows text where numbers or dates are now; that is not a change in the file."""
     if not saved:
         return None
     old = {c["name"]: c["type"] for c in saved}
@@ -410,6 +515,7 @@ def schema_drift(saved: list[dict] | None, current: list[dict]) -> dict | None:
         for c in old
         if c in new and old[c] != new[c] and "empty" not in (old[c], new[c])
         and {old[c], new[c]} != {"integer", "number"}
+        and not (from_csv and old[c] == "text")
     ]
     if not (missing or added or changed):
         return None
@@ -432,7 +538,10 @@ def column_values(s: pd.Series, limit: int | None = None) -> list[Any]:
         s = s.iloc[:limit]
     if pd.api.types.is_datetime64_any_dtype(s):
         if getattr(s.dt, "tz", None) is None and not (s.dt.microsecond.fillna(0) != 0).any():
-            return s.dt.strftime("%Y-%m-%dT%H:%M:%S").astype(object).where(s.notna(), None).tolist()
+            # numpy formats as YYYY-MM-DDTHH:MM:SS many times faster than strftime.
+            out = np.datetime_as_string(s.to_numpy(dtype="datetime64[s]"), unit="s").astype(object)
+            out[s.isna().to_numpy()] = None
+            return out.tolist()
         return [None if pd.isna(v) else v.isoformat() for v in s]
     if pd.api.types.is_float_dtype(s):
         s = s.where(np.isfinite(s))

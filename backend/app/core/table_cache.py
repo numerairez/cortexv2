@@ -24,7 +24,7 @@ from .. import config
 from ..connectors import tabular
 
 # Bump when the reader's output changes, so tables parsed by older code are read again.
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 MAX_ENTRIES = 24
 MAX_BYTES = 2 * 1024**3
 

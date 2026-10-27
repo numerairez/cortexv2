@@ -87,7 +87,7 @@ def resolve_selection(selection_id: str, ref: str, as_text: bool = True) -> Reso
                 item.table = t.df
                 item.header_row = t.header_row
                 item.warnings.extend(t.warnings)
-                drift = tabular.schema_drift(sel["schema"], tabular.schema_of(t.df))
+                drift = tabular.schema_drift(sel["schema"], tabular.schema_of(t.df), tabular.is_csv(path))
                 if drift:
                     item.warnings.append("Schema drift since selection was saved: " + _describe_drift(drift))
                 segs = _sheet_segments(t, cfg["sheet"]) if as_text else []
