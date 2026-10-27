@@ -358,6 +358,9 @@ export interface Settings {
   prompt_token_budget: number
   chatbot_name: string
   confluence_token_set: boolean
+  save_folder: string | null
+  welcomed: boolean
+  suggested_save_folder: string
 }
 
 export interface TemplateMatch {

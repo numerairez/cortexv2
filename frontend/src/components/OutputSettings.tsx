@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, qs } from '../api'
-import type { RecipeOutput } from '../types'
+import type { RecipeOutput, Settings } from '../types'
 import { FolderPicker } from './FolderPicker'
 import { FileIcon } from './Icons'
 import { Field } from './ui'
@@ -23,6 +23,8 @@ export function OutputSettings({ output, onChange }: { output: Output; onChange:
   const [typed, setTyped] = useState(output.folder ?? '')
   const [check, setCheck] = useState<{ ok: boolean; message: string } | null>(null)
   const set = (patch: Partial<Output>) => onChange({ ...output, ...patch })
+  const [defaultFolder, setDefaultFolder] = useState<string | null>(null)
+  useEffect(() => { api.get<Settings>('/api/settings').then((s) => setDefaultFolder(s.save_folder)).catch(() => undefined) }, [])
 
   useEffect(() => { setTyped(output.folder ?? '') }, [output.folder])
   useEffect(() => {
@@ -79,7 +81,9 @@ export function OutputSettings({ output, onChange }: { output: Output; onChange:
           </>
         ) : (
           <>
-            <p className="faint small" style={{ margin: '4px 0 6px' }}>Not set — results are kept in the app's run history, where you can open or download them.</p>
+            <p className="faint small" style={{ margin: '4px 0 6px' }}>{defaultFolder
+              ? <>Using your save folder <span className="mono">{defaultFolder}</span> (change it in Settings). Choose another just for this workflow:</>
+              : "Not set — results are kept in the app's run history, where you can open or download them."}</p>
             <div className="row" style={{ flexWrap: 'nowrap' }}>
               <input className="mono" style={{ fontSize: 12.5 }} placeholder="Paste a folder, e.g. S:\Finance\Reports" value={typed}
                 onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && typed.trim()) set({ folder: typed.trim() }) }}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { FolderPicker } from '../components/FolderPicker'
 import { ErrorBox, Field, Loading, useLoad, useToast } from '../components/ui'
 import type { Settings } from '../types'
 
@@ -14,6 +15,7 @@ export default function SettingsPage() {
   const [form, setForm] = useState<Settings | null>(null)
   const [token, setToken] = useState('')
   const [testPage, setTestPage] = useState('')
+  const [picking, setPicking] = useState(false)
   const [testResult, setTestResult] = useState<{ ok: boolean; error?: string; title?: string; version?: number } | null>(null)
   const toast = useToast()
 
@@ -28,6 +30,14 @@ export default function SettingsPage() {
       })
       settings.setData(s)
       toast('Settings saved')
+    } catch (e) { toast((e as Error).message, true) }
+  }
+  const saveFolder = async (save_folder: string | null) => {
+    setPicking(false)
+    try {
+      const s = await api.put<Settings>('/api/settings', { save_folder })
+      settings.setData(s)
+      toast(save_folder ? 'Files will be saved there' : 'Save folder cleared')
     } catch (e) { toast((e as Error).message, true) }
   }
   const saveToken = async () => {
@@ -66,6 +76,18 @@ export default function SettingsPage() {
           <h2>Data handling</h2>
           {!form ? <Loading /> : (
             <>
+              <div>
+                <span className="label small" style={{ fontWeight: 600 }}>Save files to</span>
+                <div className="row" style={{ flexWrap: 'nowrap', marginTop: 6 }}>
+                  <span aria-hidden>📁</span>
+                  <span className={`small ellipsis${settings.data?.save_folder ? ' mono' : ' faint'}`} style={{ flex: 1 }} title={settings.data?.save_folder ?? ''}>
+                    {settings.data?.save_folder ?? 'Not set — results stay in History'}
+                  </span>
+                  <button className="sm" onClick={() => setPicking(true)}>Change…</button>
+                  {settings.data?.save_folder && <button className="sm ghost" onClick={() => saveFolder(null)}>Clear</button>}
+                </div>
+                <div className="muted small" style={{ marginTop: 4 }}>Used by workflows that don't have their own output folder.</div>
+              </div>
               <Field label="Name of your approved AI chatbot" help="Shown in confirmations, e.g. “Copilot (company tenant)”.">
                 <input value={form.chatbot_name} onChange={(e) => setForm({ ...form, chatbot_name: e.target.value })} />
               </Field>
@@ -114,6 +136,7 @@ export default function SettingsPage() {
           )}
         </div>
       </div>
+      {picking && <FolderPicker title="Save files to…" start={settings.data?.save_folder} onClose={() => setPicking(false)} onPick={saveFolder} />}
     </>
   )
 }

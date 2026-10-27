@@ -1195,3 +1195,14 @@ button.ai-describe:hover { background: var(--hl-soft) !important; }
 .dash-heading-show { margin: 0 0 10px; color: var(--muted); }
 .dash-heading.editing input.dash-heading-title { font-size: 22px; font-weight: 700; letter-spacing: -.01em; line-height: 1.25; color: var(--fg); }
 .dash-heading.editing textarea.dash-heading-sub { font-size: 14px; line-height: 1.45; color: var(--muted); }
+
+/* ---------- first-launch welcome */
+.welcome { position: fixed; inset: 0; z-index: 40; background: var(--bg); display: grid; place-items: center; padding: 16px; }
+.welcome-card { width: min(440px, 100%); display: flex; flex-direction: column; align-items: center; gap: 14px; text-align: center; }
+.welcome-card h1 { margin: 6px 0 0; font-size: 24px; }
+.welcome-card p { margin: 0; }
+.welcome-folder { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px 14px; text-align: left; border-radius: 10px; background: var(--surface); border: 1px solid var(--line); }
+.welcome-folder .mono { flex: 1; min-width: 0; font-size: 13px; }
+.welcome-folder:hover .welcome-change { text-decoration: underline; }
+.welcome-change { color: var(--accent); font-size: 13px; font-weight: 600; flex: none; }
+.welcome-go { width: 100%; padding: 10px; font-size: 15px; margin-top: 6px; }

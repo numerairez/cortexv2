@@ -6,7 +6,7 @@ interface Entry { name: string; path: string; type: 'dir' | 'file' }
 interface Listing { path: string | null; parent: string | null; roots: { name: string; path: string }[]; entries: Entry[] }
 
 /** Browse folders on this PC / mapped drives and choose one. */
-export function FolderPicker({ start, onPick, onClose }: { start?: string | null; onPick: (path: string) => void; onClose: () => void }) {
+export function FolderPicker({ start, title = 'Choose the output folder', onPick, onClose }: { start?: string | null; title?: string; onPick: (path: string) => void; onClose: () => void }) {
   const [path, setPath] = useState<string | null>(start || null)
   const [data, setData] = useState<Listing | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -19,7 +19,7 @@ export function FolderPicker({ start, onPick, onClose }: { start?: string | null
 
   const dirs = (data?.entries ?? []).filter((e) => e.type === 'dir')
   return (
-    <Modal title="Choose the output folder" wide onClose={onClose} footer={<>
+    <Modal title={title} wide onClose={onClose} footer={<>
       <button onClick={onClose}>Cancel</button>
       <button className="primary" disabled={!data?.path} onClick={() => data?.path && onPick(data.path)}>Use this folder</button>
     </>}>

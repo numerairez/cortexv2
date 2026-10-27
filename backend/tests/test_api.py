@@ -356,3 +356,28 @@ def test_renamed_data_folder_is_migrated(tmp_path, monkeypatch):
     new = config.default_data_dir()
     assert new == tmp_path / "Flowbook" and (new / "workbench.sqlite3").read_text() == "data" and not old.exists()
     assert config.default_data_dir() == new   # second start: nothing to move
+
+
+def test_save_folder_from_welcome_is_used_by_runs(client, files, tmp_path):
+    s = client.get("/api/settings").json()
+    assert s["welcomed"] is False and s["save_folder"] is None and s["suggested_save_folder"]
+    assert client.put("/api/settings", json={"save_folder": "relative/path"}).status_code == 400
+
+    target = tmp_path / "My Reports" / "Flowbook"   # created on save
+    s = client.put("/api/settings", json={"save_folder": str(target), "welcomed": True}).json()
+    assert s["welcomed"] is True and s["save_folder"] == str(target) and target.is_dir()
+
+    jan = add(client, files["jan"])
+    sel = sheet_selection(client, jan["id"], "Sales", 5, "Jan")
+    definition = {"inputs": [{"role": "sales"}], "base": "sales", "steps": [],
+                  "output": {"name": "jan copy", "formats": ["csv"]}}
+    run = client.post("/api/transform/run", json={"recipe": definition, "bindings": {"sales": sel["id"]}}).json()
+    assert run["status"] == "completed", run
+    assert (target / "jan copy.csv").is_file()
+
+    # A workflow's own folder still wins.
+    own = tmp_path / "own"
+    own.mkdir()
+    definition["output"]["folder"] = str(own)
+    client.post("/api/transform/run", json={"recipe": definition, "bindings": {"sales": sel["id"]}})
+    assert (own / "jan copy.csv").is_file() and not (target / "jan copy (2).csv").exists()

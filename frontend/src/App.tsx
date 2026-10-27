@@ -1,4 +1,7 @@
+import { useEffect, useState } from 'react'
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom'
+import { api } from './api'
+import { Welcome } from './components/Welcome'
 import About from './pages/About'
 import CollectionEditor from './pages/CollectionEditor'
 import Contexts from './pages/Contexts'
@@ -15,6 +18,7 @@ import SourceDetail from './pages/SourceDetail'
 import Sources from './pages/Sources'
 import Studio from './pages/Studio'
 import Workflows from './pages/Workflows'
+import type { Settings } from './types'
 
 const I = {
   workflows: <><circle cx="5" cy="12" r="2.5" /><circle cx="19" cy="6" r="2.5" /><circle cx="19" cy="18" r="2.5" /><path d="M7.5 12h4l5-6M11.5 12l5 6" /></>,
@@ -53,8 +57,11 @@ function LegacyTransform() {
 export default function App() {
   const { pathname } = useLocation()
   const inWorkflows = pathname === '/' || pathname.startsWith('/workflows')
+  const [welcome, setWelcome] = useState<Settings | null>(null)
+  useEffect(() => { api.get<Settings>('/api/settings').then((s) => { if (!s.welcomed) setWelcome(s) }).catch(() => undefined) }, [])
   return (
     <div className="shell">
+      {welcome && <Welcome settings={welcome} onDone={() => setWelcome(null)} />}
       <aside className="sidebar">
         <div className="brand">
           <img className="brand-logo" src="/logo.svg" alt="" width="28" height="28" />

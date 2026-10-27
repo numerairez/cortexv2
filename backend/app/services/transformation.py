@@ -263,7 +263,13 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
 
     try:
         # 0. Check the output folder first, so a missing share fails before any work is done.
-        out_folder = check_output_folder(recipe.output.folder) if recipe.output.folder else None
+        # Outputs without their own folder go to the save folder chosen at first launch, if it's reachable.
+        default_folder = db.get_setting("save_folder")
+        try:
+            default_folder = check_output_folder(default_folder) if default_folder else None
+        except SourceError:
+            default_folder = None
+        out_folder = check_output_folder(recipe.output.folder) if recipe.output.folder else default_folder
         for o in recipe.extra_outputs:
             if o.folder:
                 check_output_folder(o.folder)
@@ -336,7 +342,7 @@ def _perform_run(run_id: str, recipe: Recipe, bindings: dict[str, str], title: s
                 n += 1
             used_names.add(base.lower())
             label = _output_label(out.name, title, out_id)
-            folder = (check_output_folder(out.folder) if out.folder else None) if out_id != "main" else out_folder
+            folder = (check_output_folder(out.folder) if out.folder else default_folder) if out_id != "main" else out_folder
             files: list[str] = []
             for fmt in out.formats:
                 report(stage="write", done=total, message=f"Writing {base}.{fmt}…")

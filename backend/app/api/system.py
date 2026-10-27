@@ -23,6 +23,8 @@ SETTINGS_DEFAULTS = {
     "retain_prompts": True,
     "prompt_token_budget": 100_000,
     "chatbot_name": "the approved company AI chatbot",
+    "save_folder": None,   # where run results are saved when a workflow has no folder of its own
+    "welcomed": False,     # the first-launch welcome has been answered (folder chosen or skipped)
 }
 BROWSABLE_EXTS = {".xlsx", ".xlsm", ".csv", ".tsv", ".xlsb", ".xls", ".bas", ".cls"} | DOCUMENT_EXTS
 REQUIRED_PACKAGES = ["fastapi", "uvicorn", "pydantic", "pandas", "numpy", "openpyxl", "pypdf", "python-docx", "httpx", "olefile"]
@@ -60,7 +62,27 @@ def environment():
 def get_settings():
     out = {k: db.get_setting(k, v) for k, v in SETTINGS_DEFAULTS.items()}
     out["confluence_token_set"] = confluence.has_session_token()
+    out["suggested_save_folder"] = str(_suggested_save_folder())
     return out
+
+
+def _suggested_save_folder() -> Path:
+    docs = Path.home() / "Documents"
+    return (docs if docs.is_dir() else Path.home()) / "Flowbook"
+
+
+def _prepare_save_folder(value: str) -> str:
+    """Create the chosen save folder if needed and make sure files can be written there."""
+    p = Path(value.strip().strip('"')).expanduser()
+    if not p.is_absolute():
+        raise SourceError("Use a full folder path")
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise SourceError(f"Couldn't create {p}. Choose another folder.")
+    if not os.access(p, os.W_OK):
+        raise SourceError("You don't have permission to save here")
+    return str(p)
 
 
 @router.put("/settings")
@@ -72,8 +94,10 @@ def put_settings(body: dict):
             raise SourceError("Confluence URL must start with https://")
         if k == "prompt_token_budget":
             v = max(1000, int(v))
-        if k == "retain_prompts":
+        if k in ("retain_prompts", "welcomed"):
             v = bool(v)
+        if k == "save_folder":
+            v = _prepare_save_folder(str(v)) if v else None
         db.set_setting(k, v)
     return get_settings()
 
