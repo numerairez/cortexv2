@@ -12,7 +12,7 @@ import { PivotBody } from '../components/dashboard/Pivot'
 import { ChartBody, HeadlineBody, TableBody, TYPE_LABEL, WidgetIcon } from '../components/dashboard/Widgets'
 import { FileIcon, TypeGlyph } from '../components/Icons'
 import { describeCondition } from '../components/StepEditor'
-import { ErrorBox, Loading, Modal, Spinner, fmtDate, useToast } from '../components/ui'
+import { ErrorBox, Loading, Modal, Spinner, WaitMessages, fmtDate, useToast } from '../components/ui'
 import {
   activeConditions, applyFilter, defaultMeasure, canDrive, canHighlight, vegaLiteFilters, defaultSelectBy, describeSel, freeSpot, isCategory, isNumeric, matches, measureLabel, measureOf, newId, newWidget, selIsEmpty, settle, timeUnitFor, toRows,
   type Box, type ColType, type Dashboard, type DashboardSpec, type DashData, type Row, type Sel, type Widget, type WidgetType,
@@ -437,6 +437,7 @@ export default function DashboardEditor() {
       </div>
 
       {dataError && <div className="dash-banner"><ErrorBox error={`Couldn’t read the data: ${dataError}`} /></div>}
+      {dataLoading && !data && <div className="dash-banner"><WaitMessages compact /></div>}
 
       <div className="dash-body">
         {mode === 'edit' && (
@@ -459,7 +460,7 @@ export default function DashboardEditor() {
               <div className="label-sm">Fields <span className="faint">· drag onto an object</span></div>
               {columns.length > 8 && <input placeholder="Search columns…" value={fieldFilter} onChange={(e) => setFieldFilter(e.target.value)} style={{ marginBottom: 6 }} />}
               <div className="field-list">
-                {dataLoading && !data ? <Loading /> : shownFields.map((c) => (
+                {dataLoading && !data ? <Spinner /> : shownFields.map((c) => (
                   <div key={c.name} className="field-item" draggable title={`${c.name} (${c.type})`}
                     onDragStart={(e) => { e.dataTransfer.setData(FIELD_MIME, c.name); e.dataTransfer.effectAllowed = 'copy' }}>
                     <TypeGlyph type={c.type} /><span className="ellipsis">{c.name}</span>

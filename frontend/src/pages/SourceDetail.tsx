@@ -4,7 +4,7 @@ import { TemplateOffer, suggestTemplate } from '../components/Templates'
 import { api, qs } from '../api'
 import { DataTable, fmt } from '../components/DataTable'
 import { FileBrowser } from '../components/FileBrowser'
-import { ErrorBox, Field, KindIcon, Loading, Modal, Spinner, StatusBadge, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
+import { ErrorBox, Field, KindIcon, Loading, Modal, Spinner, StatusBadge, WaitMessages, fmtBytes, fmtDate, sourceModified, useLoad, useToast } from '../components/ui'
 import { RunDialog } from '../components/RunDialog'
 import { WorkflowGraph } from '../components/WorkflowGraph'
 import { bindingId } from '../datasets'
@@ -369,6 +369,7 @@ function SheetConfigurator({ source, editing, onSaved, onCancelEdit }: {
             <input value={label} onChange={(e) => setLabel(e.target.value)} placeholder={`${source.name} – ${sheet === '(csv)' ? 'data' : sheet}`} />
           </Field>
           <ErrorBox error={profileError} />
+          {!profile && !profileError && header && <WaitMessages compact />}
           {profile && (
             <>
               <div className="muted small">{profile.row_count.toLocaleString()} data rows · {profile.columns.length} columns · {chosen.length} selected</div>

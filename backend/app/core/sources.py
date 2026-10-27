@@ -274,10 +274,24 @@ def preview_sheet(source_id: str, sheet: str, rows: int = 30) -> dict:
         raise SourceError("File no longer exists at this path", 404)
 
 
+def _load_table(path: Path, sheet: str, header_row: int, columns: list[str] | None = None) -> tabular.LoadedTable:
+    """A sheet's table through the parsed-table cache: adding a large file reads it once, rather
+    than again for its schema when saved and again for its first dashboard or workflow."""
+    from . import table_cache
+
+    try:
+        sha256 = documents.fingerprint_file(path)["sha256"]
+    except documents.DocumentError as e:
+        if not path.exists():
+            raise FileNotFoundError(path) from e
+        raise tabular.TabularError(str(e)) from e
+    return table_cache.load_table(path, sheet, header_row, columns, sha256)
+
+
 def profile_sheet(source_id: str, sheet: str, header_row: int, columns: list[str] | None = None) -> dict:
     src = get_source(source_id)
     try:
-        t = tabular.load_table(Path(src["location"]), sheet, header_row, columns)
+        t = _load_table(Path(src["location"]), sheet, header_row, columns)
     except tabular.TabularError as e:
         raise SourceError(str(e))
     except FileNotFoundError:
@@ -364,7 +378,7 @@ def _safe_key(key: str) -> str:
 def _sheet_schema(src: dict, config: dict) -> list[dict]:
     header_row = int(config.get("header_row") or 1)
     try:
-        t = tabular.load_table(Path(src["location"]), config["sheet"], header_row, config.get("columns") or None)
+        t = _load_table(Path(src["location"]), config["sheet"], header_row, config.get("columns") or None)
     except tabular.TabularError as e:
         raise SourceError(str(e))
     return tabular.schema_of(t.df)
@@ -424,7 +438,7 @@ def check_selection(selection_id: str) -> dict:
         return {**result, "status": "missing", "detail": "File no longer exists at this path"}
     if sel["kind"] == "sheet":
         try:
-            t = tabular.load_table(path, sel["config"]["sheet"], sel["config"]["header_row"])
+            t = _load_table(path, sel["config"]["sheet"], sel["config"]["header_row"])
         except tabular.TabularError as e:
             return {**result, "status": "error", "detail": str(e)}
         except PermissionError:

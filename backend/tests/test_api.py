@@ -381,3 +381,17 @@ def test_save_folder_from_welcome_is_used_by_runs(client, files, tmp_path):
     definition["output"]["folder"] = str(own)
     client.post("/api/transform/run", json={"recipe": definition, "bindings": {"sales": sel["id"]}})
     assert (own / "jan copy.csv").is_file() and not (target / "jan copy (2).csv").exists()
+
+
+def test_adding_a_file_reads_its_table_once(client, files, monkeypatch):
+    """Profiling, saving and the first dashboard share one parsed copy from the table cache."""
+    from app.connectors import tabular
+
+    src = add(client, files["jan"])
+    assert client.post(f"/api/sources/{src['id']}/profile", json={"sheet": "Sales", "header_row": 5}).status_code == 200
+
+    def boom(*a, **k):
+        raise AssertionError("the file should not be parsed again")
+    monkeypatch.setattr(tabular, "load_table", boom)
+    sel = sheet_selection(client, src["id"], "Sales", 5, "Jan")
+    assert client.get("/api/dashboards/data", params={"dataset": sel["id"]}).json()["row_count"] == 5

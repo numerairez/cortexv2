@@ -207,6 +207,9 @@ table.sheet tr.header-row:hover td.rowhead { background: var(--accent); color: v
 .spinner { width: 16px; height: 16px; border: 2px solid var(--line-strong); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; display: inline-block; }
 @keyframes spin { to { transform: rotate(360deg); } }
 .loading { display: flex; align-items: center; gap: 10px; color: var(--muted); padding: 24px; }
+.loading.compact { padding: 4px 0; font-size: 12.5px; }
+.wait-text { animation: wait-in .4s ease; }
+@keyframes wait-in { from { opacity: 0; transform: translateY(2px); } to { opacity: 1; transform: none; } }
 .toast-host { position: fixed; bottom: 20px; right: 20px; display: flex; flex-direction: column; gap: 8px; z-index: 100; max-width: min(420px, calc(100vw - 40px)); }
 .toast { background: var(--fg); color: var(--bg); padding: 10px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
 .toast.bad { background: var(--bad); color: #fff; }
@@ -1121,7 +1124,7 @@ button.ai-describe:hover { background: var(--hl-soft) !important; }
 .dash-link.change-changed .line { stroke-width: 3; }
 .dash-link.change-changed .link-pill { box-shadow: 0 0 0 2px var(--warn); }
 @keyframes link-march { to { stroke-dashoffset: -24; } }
-@media (prefers-reduced-motion: reduce) { .dash-link.change-added .line { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .dash-link.change-added .line, .wait-text { animation: none; } }
 
 /* a new chart's choice: build it by hand or describe it */
 .ai-content.choice { justify-content: center; align-items: stretch; gap: 10px; padding: 8px 12%; }

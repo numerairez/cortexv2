@@ -6,7 +6,7 @@ import { fmt } from './DataTable'
 import { FileBrowser } from './FileBrowser'
 import { FileIcon } from './Icons'
 import { TemplateOffer, suggestTemplate } from './Templates'
-import { ErrorBox, Loading, Modal, Spinner, useLoad, useToast } from './ui'
+import { ErrorBox, Loading, Modal, Spinner, WaitMessages, useLoad, useToast } from './ui'
 
 export interface UploadResult { path: string; source: Source | null; existing: boolean }
 
@@ -70,6 +70,7 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
   const [header, setHeader] = useState<number | null>(null)
   const [preview, setPreview] = useState<SheetPreview | null>(null)
   const [profile, setProfile] = useState<SheetProfile | null>(null)
+  const [profiling, setProfiling] = useState(false)
   const [label, setLabel] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
@@ -82,10 +83,14 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
   }, [source.id, sheet])
   useEffect(() => {
     if (!header) return
+    let live = true
     const t = setTimeout(() => {
-      api.post<SheetProfile>(`/api/sources/${source.id}/profile`, { sheet, header_row: header }).then(setProfile).catch(() => setProfile(null))
+      setProfiling(true)
+      api.post<SheetProfile>(`/api/sources/${source.id}/profile`, { sheet, header_row: header })
+        .then((p) => { if (live) setProfile(p) }).catch(() => { if (live) setProfile(null) })
+        .finally(() => { if (live) setProfiling(false) })
     }, 200)
-    return () => clearTimeout(t)
+    return () => { live = false; clearTimeout(t); setProfiling(false) }
   }, [source.id, sheet, header])
 
   const save = async () => {
@@ -147,6 +152,7 @@ export function SheetSetup({ source, presetSheet, onDone, onBack }: {
         <span className="small">Headers on row</span>
         <input type="number" min={1} className="inline-input" style={{ width: 80 }} value={header ?? ''} onChange={(e) => setHeader(Math.max(1, Number(e.target.value) || 1))} aria-label="Header row" />
         <span className="spacer" />
+        {!profile && profiling && <WaitMessages compact />}
         {profile && <span className="muted small">{profile.row_count.toLocaleString()} rows · {profile.columns.length} columns: {profile.columns.slice(0, 5).map((c) => c.name).join(', ')}{profile.columns.length > 5 ? '…' : ''}</span>}
       </div>
       {profile?.warnings.length ? <div className="alert warn small"><ul>{profile.warnings.map((w) => <li key={w}>{w}</li>)}</ul></div> : null}

@@ -129,6 +129,34 @@ export function Loading({ text = 'Loading…' }: { text?: string }) {
   return <div className="loading"><Spinner /> {text}</div>
 }
 
+/** What reading a whole dataset says while it runs, by seconds waited. The first read of a large
+ *  file takes a while; after that it comes from the table cache in about a second. */
+export const READING_DATA: [number, string][] = [
+  [0, 'Reading the data…'],
+  [4, 'Still reading. Large files take longer the first time.'],
+  [10, 'Working out which columns hold numbers, dates and text…'],
+  [20, 'Nearly there. Next time this file opens much faster.'],
+  [45, 'Still working. Very large files can take a minute or two.'],
+]
+
+/** A wait that may run long: the message moves on as time passes, with the seconds so far,
+ *  so a slow first read never looks stuck. Each step is [seconds after which it shows, text]. */
+export function WaitMessages({ steps = READING_DATA, compact }: { steps?: [number, string][]; compact?: boolean }) {
+  const [secs, setSecs] = useState(0)
+  useEffect(() => {
+    const start = Date.now()
+    const t = setInterval(() => setSecs(Math.floor((Date.now() - start) / 1000)), 1000)
+    return () => clearInterval(t)
+  }, [])
+  const text = steps.filter(([at]) => secs >= at).pop()?.[1] ?? steps[0][1]
+  return (
+    <div className={`loading wait${compact ? ' compact' : ''}`} role="status" aria-live="polite">
+      <Spinner /> <span key={text} className="wait-text">{text}</span>
+      {secs >= 3 && <span className="faint small nowrap">{secs}s</span>}
+    </div>
+  )
+}
+
 export function ErrorBox({ error }: { error: string | null }) {
   if (!error) return null
   return <div className="alert bad">{error}</div>
