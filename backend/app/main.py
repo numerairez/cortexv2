@@ -17,6 +17,7 @@ from .api import runs as runs_api
 from .api import sources as sources_api
 from .api import system as system_api
 from .config import APP_VERSION, FRONTEND_DIST
+from .core import copies
 from .core.sources import SourceError
 from .services import knowledge_base as _kb  # noqa: F401  (registers service)
 from .services import macro as _macro  # noqa: F401  (registers service)
@@ -38,6 +39,7 @@ def _env_ports() -> set[int] | None:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     db.conn()  # run migrations before serving
+    copies.sync_all()  # readable copies of workflows and dashboards in the save folder, in the background
     yield
 
 

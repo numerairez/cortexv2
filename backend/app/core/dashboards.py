@@ -15,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 from ..connectors import tabular
 from ..storage import db
 from ..transformations.recipe import Condition
+from . import copies
 from .sources import SourceError
 
 GRID_COLUMNS = 12
@@ -191,12 +192,14 @@ def save_dashboard(dashboard_id: str | None, name: str, description: str, datase
         dashboard_id = db.new_id("dsh")
         db.execute("INSERT INTO dashboards (id, name, description, dataset, spec, created_at, updated_at) "
                    "VALUES (?, ?, ?, ?, ?, ?, ?)", (dashboard_id, name.strip(), description, dataset, body, ts, ts))
+    copies.write("dashboard", dashboard_id)
     return get_dashboard(dashboard_id)
 
 
 def delete_dashboard(dashboard_id: str) -> None:
     get_dashboard(dashboard_id)
     db.execute("UPDATE dashboards SET deleted_at = ? WHERE id = ?", (db.now(), dashboard_id))
+    copies.write("dashboard", dashboard_id)
 
 
 # ---------------------------------------------------------------- data

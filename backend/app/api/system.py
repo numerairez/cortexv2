@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from ..config import APP_VERSION, MIN_PYTHON, get_paths
 from ..connectors import confluence
+from ..core import copies
 from ..core.sources import DOCUMENT_EXTS, SourceError
 from ..storage import db
 
@@ -99,6 +100,8 @@ def put_settings(body: dict):
         if k == "save_folder":
             v = _prepare_save_folder(str(v)) if v else None
         db.set_setting(k, v)
+    if "save_folder" in body:
+        copies.sync_all()
     return get_settings()
 
 

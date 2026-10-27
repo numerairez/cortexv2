@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..storage import db
 from ..transformations.recipe import Recipe
+from . import copies
 from .sources import SourceError
 
 
@@ -72,9 +73,11 @@ def save_recipe(recipe_id: str | None, name: str, description: str, definition: 
         c.execute(
             "INSERT INTO recipe_versions (id, recipe_id, version, definition, origin, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (db.new_id("rcv"), recipe_id, version, db.dumps(body), origin, ts))
+    copies.write("workflow", recipe_id)
     return get_recipe(recipe_id)
 
 
 def delete_recipe(recipe_id: str) -> None:
     get_recipe(recipe_id)
     db.execute("UPDATE recipes SET deleted_at = ? WHERE id = ?", (db.now(), recipe_id))
+    copies.write("workflow", recipe_id)

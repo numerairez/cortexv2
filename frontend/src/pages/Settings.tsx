@@ -86,7 +86,7 @@ export default function SettingsPage() {
                   <button className="sm" onClick={() => setPicking(true)}>Change…</button>
                   {settings.data?.save_folder && <button className="sm ghost" onClick={() => saveFolder(null)}>Clear</button>}
                 </div>
-                <div className="muted small" style={{ marginTop: 4 }}>Used by workflows that don't have their own output folder.</div>
+                <div className="muted small" style={{ marginTop: 4 }}>Used by workflows that don't have their own output folder. A readable copy of each workflow and dashboard is also kept in its <span className="mono">Workflows</span> and <span className="mono">Dashboards</span> folders, so you can open and check them.</div>
               </div>
               <Field label="Name of your approved AI chatbot" help="Shown in confirmations, e.g. “Copilot (company tenant)”.">
                 <input value={form.chatbot_name} onChange={(e) => setForm({ ...form, chatbot_name: e.target.value })} />

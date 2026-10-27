@@ -38,6 +38,8 @@ def data_dir(tmp_path, monkeypatch):
     from app.storage import db
     db._conn = None
     yield d
+    from app.core import copies
+    copies.flush()   # readable copies are written in the background; finish before the next test
     db._conn = None
 
 
