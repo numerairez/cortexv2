@@ -5,7 +5,13 @@ cd /d "%~dp0"
 title Flowbook
 
 set "PY="
-if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
+set "BUNDLED="
+rem Releases built with --bundle-python carry their own Python with everything installed.
+if exist "python\python.exe" (
+    set "PY=python\python.exe"
+    set "BUNDLED=1"
+)
+if not defined PY if exist ".venv\Scripts\python.exe" set "PY=.venv\Scripts\python.exe"
 if not defined PY (
     where py >nul 2>nul && set "PY=py -3"
 )
@@ -21,7 +27,7 @@ if not defined PY (
     exit /b 1
 )
 
-if not exist ".venv\Scripts\python.exe" (
+if not defined BUNDLED if not exist ".venv\Scripts\python.exe" (
     echo No private environment found. Run setup.bat once before launching.
     echo Trying to start with the system Python anyway...
 )
@@ -35,9 +41,11 @@ if not exist "frontend\dist\index.html" (
     exit /b 1
 )
 
+rem The bundled Python finds backend\ through python\python3*._pth and ignores PYTHON* variables,
+rem so UTF-8 mode is also requested on the command line.
 set "PYTHONPATH=%~dp0backend"
 set "PYTHONUTF8=1"
-%PY% -m app.launcher %*
+%PY% -X utf8 -m app.launcher %*
 if errorlevel 1 (
     echo.
     pause

@@ -13,14 +13,14 @@ Everything runs on the user's own PC, bound to `127.0.0.1`. See [PLAN.md](PLAN.m
 ## For colleagues (Windows)
 
 1. Unzip the release folder somewhere in your user area (e.g. `Documents\flowbook`).
-2. Double-click **`setup.bat`** once. It creates a private Python environment in `.venv` and installs the dependencies. If the release includes a `wheels` folder, setup runs fully offline.
+2. If the folder contains a `python` folder, skip this step: Python and everything it needs are included. Otherwise double-click **`setup.bat`** once. It creates a private Python environment in `.venv` and installs the dependencies. If the release includes a `wheels` folder, setup runs fully offline.
 3. Double-click **`launch.bat`**. Your browser opens the app. Keep the black window open while you work; close it to stop the app.
 
 Your data (database, outputs, logs) lives in `%LOCALAPPDATA%\Flowbook`, not in the app folder, so updating the app never touches it. (Data from the app's earlier name, `ContextWorkbench`, is moved there automatically on first start.)
 
-Requirements: Python 3.10+ (3.11+ uses the pinned lock file). No administrator rights or Node.js needed.
+Requirements: none for a release with a `python` folder. Otherwise Python 3.10+ (3.11+ uses the pinned lock file). No administrator rights or Node.js needed.
 
-**Updating to a new version:** close the black Flowbook window, delete the old app folder (or use a new one; don't unzip on top of it, or files removed from the app stay behind), unzip the new release, run `setup.bat` once, then `launch.bat`. If the old version is still running, `launch.bat` says so and asks you to close it first, rather than opening the old screens. Your data is kept.
+**Updating to a new version:** close the black Flowbook window, delete the old app folder (or use a new one; don't unzip on top of it, or files removed from the app stay behind), unzip the new release, run `setup.bat` once if it has no `python` folder, then `launch.bat`. If the old version is still running, `launch.bat` says so and asks you to close it first, rather than opening the old screens. Your data is kept.
 
 ## What's implemented (MVP, milestones 1–3)
 
@@ -70,15 +70,19 @@ The server sends `Cache-Control: no-cache` for `index.html` and the other un-has
 ### Building a release for colleagues
 
 1. Bump `APP_VERSION` in `backend/app/config.py` (e.g. `0.1.0` → `0.1.1`). The launcher compares versions: if an older version is still running when a colleague starts the new one, it asks them to close it instead of opening the old screens. Without a bump, it can't tell the two apart.
-2. Run `python scripts/build_release.py --wheels` (needs Node.js/npm and internet access on your machine). It:
+2. Run `python scripts/build_release.py --bundle-python` (recommended) or `python scripts/build_release.py --wheels`. Either needs Node.js/npm and internet access on your machine. It:
    - runs `npm ci` and `npm run build` in `frontend/`, so the release always has a fresh UI (`--skip-ui` reuses the existing `frontend/dist`);
    - recreates `release/flowbook-<version>/`, deleting any earlier folder for the same version;
    - copies in `backend/` (without tests and caches), `frontend/dist`, `samples/`, `launch.bat`, `setup.bat`, `launch.sh`, `README.md` and `PLAN.md`;
-   - with `--wheels`, downloads every package in `backend/requirements.lock` as a Windows 64-bit wheel for Python 3.11 into `wheels/`, so `setup.bat` installs offline (`--python-version` targets another Python, e.g. `3.12`);
+   - with `--bundle-python`, downloads python.org's Windows embeddable Python (3.11.9 by default; `--bundle-python 3.14.3` picks another) into `python/` and installs every package in `backend/requirements.lock` into it as Windows 64-bit builds. Colleagues need no Python, no `setup.bat` and no internet. The zip is about 50 MB;
+   - with `--wheels` instead, downloads those packages as Windows 64-bit wheels for Python 3.11 into `wheels/`, so `setup.bat` installs offline into the colleague's own Python (`--python-version` targets another Python, e.g. `3.12`);
+   - writes `launch.bat` and `setup.bat` with Windows line endings;
    - zips the folder to `release/flowbook-<version>.zip`.
 3. Send the zip. Colleagues follow [Updating to a new version](#for-colleagues-windows).
 
-The bundled wheels match one Python version. A colleague whose Python differs (check with `py --version`) needs a release built with `--python-version` set to theirs. On Python 3.10, `setup.bat` installs `backend/requirements.txt` instead of the lock file, which the 3.11 wheels don't cover.
+How the bundled Python works: `launch.bat` uses `python\python.exe` when it exists (else `.venv`, else the system Python), and `setup.bat` exits straight away. The embeddable Python ignores `PYTHONPATH`; its search path is `python\python311._pth`, which the release script writes to include `Lib\site-packages` and `..\backend`. Nothing runs the Windows Python during the build, so a release can be built on macOS. Python 3.11.9 is the last 3.11 with an embeddable build. Moving to a newer Python means testing the app on it first.
+
+With `--wheels`, the wheels match one Python version. A colleague whose Python differs (check with `py --version`) needs a release built with `--python-version` set to theirs. On Python 3.10, `setup.bat` installs `backend/requirements.txt` instead of the lock file, which the 3.11 wheels don't cover.
 
 ### Layout
 

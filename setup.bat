@@ -4,6 +4,13 @@ setlocal
 cd /d "%~dp0"
 title Flowbook setup
 
+if exist "python\python.exe" (
+    echo This copy of Flowbook includes its own Python with everything installed.
+    echo No setup is needed: start the app by double-clicking launch.bat.
+    pause
+    exit /b 0
+)
+
 set "PY="
 where py >nul 2>nul && set "PY=py -3"
 if not defined PY (
